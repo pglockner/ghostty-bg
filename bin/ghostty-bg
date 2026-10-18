@@ -80,7 +80,8 @@ palette colors are lightened in ghostty-bg.conf, just enough to stay
 readable and keeping their hue; deep gradients leave them as they are. On
 a light theme it is the other way round: gradients darken them, deep ones
 the most. Faint text is made more opaque where it needs to be. The
-gradients and scenes are made for dark themes, though.
+gradients and scenes are made for dark themes, though, except the lake
+scene, which is made for light ones and looks best at about 0.5.
 
 A scene is a shader kept as scenes/NAME.glsl in ghostty-bg's own folder,
 NAME in lowercase letters. It is copied in with `const float STRENGTH` (the
