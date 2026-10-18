@@ -1,7 +1,7 @@
 // A calm lake at golden hour, seen from straight above: the water runs
 // from soft blue to cream and pale gold where it mirrors the low sun, and
-// tiny boats cross it, each trailing a widening, uneven wake that
-// reinforces any other it crosses. Made for light themes. ghostty-bg puts
+// tiny boats wander across it, each trailing a long, foaming wake between
+// faint spreading waves. Made for light themes. ghostty-bg puts
 // `const float STRENGTH` (the opacity) in front of this file.
 
 const int BOATS = 6;
@@ -9,6 +9,7 @@ const float SPEED = 0.012;   // screen heights per second, roughly
 const float WAKE = 0.45;     // how far behind a boat its wake reaches
 const float KELVIN = 0.354;  // tan(19.5 degrees): a wake's arms spread at this
 const float WAVE = 450.0;    // a wake's wavenumber: 2 pi over its wavelength
+const float WANDER = 0.03;   // how far a boat strays from a straight course
 // The water, top left to bottom right: the open sky's blue, cream, then
 // the low sun's gold.
 const vec3 BLUE = vec3(0.32, 0.47, 0.60);
@@ -42,59 +43,80 @@ float noise(vec3 p) {
                    mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
 }
 
-// Where boat i is, with its heading h and half-length L. Each holds its
-// own heading and speed, and wraps round off-screen once its wake is
-// clear of the edge.
-vec2 boatAt(int i, float aspect, out vec2 h, out float L) {
-    float n = float(i);
-    float a = hash(n + 1.0) * 6.2832;
-    h = vec2(cos(a), sin(a));
-    L = mix(0.014, 0.024, hash(n + 2.0));
-    // Room off each edge: where it leaves, for the wake trailing behind;
-    // where it comes in, for the arms where they spread sideways past it.
-    vec2 ah = abs(h), across = KELVIN * ah.yx;
-    vec2 come = L + 0.02 + WAKE * max(across - ah, 0.0);
-    vec2 leave = L + 0.02 + WAKE * (ah + across);
-    vec2 span = vec2(aspect, 1.0) + come + leave;
-    float travel = SPEED * mix(0.7, 1.3, hash(n + 3.0)) * iTime;
-    return mod(vec2(hash(n + 4.0), hash(n + 5.0)) * span + h * travel, span) - mix(leave, come, step(0.0, h));
+// A boat's crossing: it runs along a lane through o in direction h,
+// straying from it as course() says, and is at along. L is half its length.
+struct Boat { vec2 o, h; float along, L, seed; };
+
+// How far the course strays sideways from the lane, at u along it: a few
+// degrees left or right, changing every third of a screen or so.
+float course(float u, float seed) {
+    float x = u / 0.35 + seed;
+    float i = floor(x), f = fract(x);
+    return (mix(hash(i), hash(i + 1.0), f * f * (3.0 - 2.0 * f)) - 0.5) * 2.0 * WANDER;
 }
 
-// The height of boat i's wake at p, in screen heights, signed, so that
+// Boat i's crossing. Each crossing takes a new lane and heading, so the
+// boat wraps round off-screen once its wake is clear of the edge.
+Boat boatAt(int i, float aspect) {
+    Boat B;
+    float n = float(i);
+    B.L = mix(0.014, 0.024, hash(n + 2.0));
+    // Room off the far edge for the wake, and off the near one for the bow.
+    float diag = sqrt(aspect * aspect + 1.0);
+    float come = B.L + 0.02, leave = B.L + 0.02 + WAKE;
+    float span = diag + come + leave;
+    float run = hash(n + 4.0) * span + SPEED * mix(0.7, 1.3, hash(n + 3.0)) * iTime;
+    float lap = floor(run / span);
+    B.along = run - lap * span - 0.5 * diag - come;
+    float a = hash3(vec3(n, lap, 1.0)) * 6.2832;
+    B.h = vec2(cos(a), sin(a));
+    float wide = aspect * abs(B.h.y) + abs(B.h.x);
+    B.o = vec2(0.5 * aspect, 0.5) + vec2(-B.h.y, B.h.x) * (hash3(vec3(n, lap, 2.0)) - 0.5) * 0.8 * wide;
+    B.seed = floor(hash3(vec3(n, lap, 3.0)) * 100.0);
+    return B;
+}
+
+// Where p is from boat B's wake: how far behind its bow, along its course
+// (b), and how far off the course to one side (y, signed).
+vec2 behind(vec2 p, Boat B) {
+    vec2 rel = p - B.o;
+    float u = dot(rel, B.h);
+    return vec2(B.along + B.L - u, dot(rel, vec2(-B.h.y, B.h.x)) - course(u, B.seed));
+}
+
+// The height of boat B's wake at p, in screen heights, signed, so that
 // wakes that cross add up where their crests meet and cancel where a crest
-// meets a trough. From the bow back: waves across the V, their crests
-// bending back toward its arms; short feathered waves along the arms; and
-// churned water right behind the stern. Noise wobbles their phase and
-// strength, so no two stretches are alike, and it all fades with distance.
-float wake(vec2 p, vec2 c, vec2 h, float L, float n) {
-    vec2 rel = p - c;
-    float x = dot(rel, h), y = abs(dot(rel, vec2(-h.y, h.x)));
-    float b = L - x;
+// meets a trough. Faint waves across the V, their crests bending back
+// toward its arms, and short feathered waves along the arms, with noise
+// wobbling their phase and strength; and churned water along the course,
+// right behind the stern. It all fades with distance.
+float wake(vec2 p, Boat B, float n) {
+    vec2 by = behind(p, B);
+    float b = by.x, y = abs(by.y);
     if (b <= 0.0 || b > WAKE) return 0.0;
-    float W = 0.38 * L;
-    float s = y / (KELVIN * b + W);  // 0 along the track, 1 on the arms
+    float W = 0.38 * B.L;
+    float s = y / (KELVIN * b + W);  // 0 along the course, 1 on the arms
     if (s > 1.6) return 0.0;
 
     float wobble = 1.8 * noise(vec3(b * 40.0, y * 40.0, iTime * 0.5 + n * 3.0));
     float patchy = 0.5 + noise(vec3(b * 22.0, y * 22.0, iTime * 0.3 + n * 7.0));
-    float across = cos(WAVE * 0.6 * b * (1.0 + 0.5 * s * s) + wobble) * (1.0 - smoothstep(0.5, 1.0, s)) * 0.3;
-    float arms = cos(WAVE * 1.3 * (0.5 * b + y) + wobble) * exp(-pow((s - 1.0) / 0.15, 2.0));
-    float fade = pow(1.0 - b / WAKE, 1.5);
-    float height = 0.035 * L * (across + arms) * patchy * fade;
+    float across = cos(WAVE * 0.6 * b * (1.0 + 0.5 * s * s) + wobble) * (1.0 - smoothstep(0.5, 1.0, s)) * 0.12;
+    float arms = cos(WAVE * 1.3 * (0.5 * b + y) + wobble) * exp(-pow((s - 1.0) / 0.15, 2.0)) * 0.45;
+    float height = 0.035 * B.L * (across + arms) * patchy * pow(1.0 - b / WAKE, 1.5);
 
-    float st = -x - 0.9 * L;
+    float st = b - 1.9 * B.L;
     if (st > 0.0) {
-        float churn = (1.0 - smoothstep(0.0, W * (0.6 + 12.0 * st), y)) * exp(-st * 12.0);
-        height += 0.12 * L * churn * (noise(vec3(rel / L * 3.0, iTime * 1.5)) - 0.5);
+        float churn = (1.0 - smoothstep(0.0, W * (0.9 + 5.0 * st), y)) * exp(-st * 5.0);
+        height += 0.08 * B.L * churn * (noise(vec3(by / B.L * 3.0, iTime * 1.5)) - 0.5);
     }
     return height;
 }
 
 // The water's height at p: slow, faint ripples, and every boat's wake.
-float surface(vec2 p, vec2 c[BOATS], vec2 h[BOATS], float L[BOATS]) {
+float surface(vec2 p, Boat B[BOATS]) {
     float t = iTime * 0.12;
     float z = 0.0012 * noise(vec3(p * vec2(9.0, 26.0), t)) + 0.0005 * noise(vec3(p * vec2(23.0, 61.0), t * 1.7));
-    for (int i = 0; i < BOATS; i++) z += wake(p, c[i], h[i], L[i], float(i));
+    for (int i = 0; i < BOATS; i++) z += wake(p, B[i], float(i));
     return z;
 }
 
@@ -121,6 +143,26 @@ vec3 water(vec2 q, float g, vec2 slope) {
     return c;
 }
 
+// The foaming wake right behind boat B, at q, over the water: a long white
+// trail along its course, widening slowly, frayed and streaked, full of
+// fine bubbles and fading as it goes, with a faint shadowed edge so it
+// still shows on pale water.
+vec3 trail(vec3 lake, vec2 q, Boat B, float n) {
+    vec2 by = behind(q, B);
+    float st = by.x - 1.85 * B.L;
+    if (st <= 0.0 || st > WAKE) return lake;
+    float W = 0.38 * B.L;
+    float spread = W * (0.9 + 5.0 * st) * (0.75 + 0.5 * noise(vec3(st * 35.0, n * 5.0, iTime * 0.5)));
+    float a = abs(by.y) / spread;
+    if (a > 1.6) return lake;
+    float fade = (1.0 - st / WAKE) * (0.55 + 0.45 * exp(-st * 8.0));
+    float streaks = noise(vec3(st * 18.0, by.y / W * 3.5, iTime * 0.4 + n));
+    float bubbles = noise(vec3(st * 220.0, by.y * 220.0, iTime * 1.2 + n));
+    float foam = (1.0 - smoothstep(0.15, 1.0, a)) * (0.35 + 0.65 * streaks) * (0.6 + 0.6 * bubbles) * fade;
+    lake *= 1.0 - 0.08 * exp(-pow((a - 1.15) / 0.25, 2.0)) * fade;
+    return mix(lake, FOAM, clamp(foam * 1.1, 0.0, 0.95));
+}
+
 // How much of the hull, half L long and half W wide, covers the point x
 // along it (bow ahead) and y across it: a pointed bow and a broad stern.
 float hull(float x, float y, float L, float W, float px) {
@@ -130,14 +172,18 @@ float hull(float x, float y, float L, float W, float px) {
     return 1.0 - smoothstep(-px, px, abs(y) - hw);
 }
 
-// Boat i at c, heading h, over the water: its shadow, then the boat, a
-// rowboat in weathered wood or a white skiff with a small cabin, each with
-// a pale rim.
-vec3 boat(vec3 lake, vec2 q, vec2 c, vec2 h, float L, float px, int i) {
-    float W = 0.38 * L;
-    vec2 side = vec2(-h.y, h.x);
+// Boat B over the water, i of them: its shadow, then the boat, turned
+// along its course, a rowboat in weathered wood or a white skiff with a
+// small cabin, each with a pale rim.
+vec3 boat(vec3 lake, vec2 q, Boat B, float px, int i) {
+    float L = B.L, W = 0.38 * L;
+    vec2 side = vec2(-B.h.y, B.h.x);
+    vec2 c = B.o + B.h * B.along + side * course(B.along, B.seed);
     vec2 rel = q - c;
     if (length(rel) > 3.0 * L) return lake;
+    float turn = (course(B.along + 0.002, B.seed) - course(B.along - 0.002, B.seed)) / 0.004;
+    vec2 h = normalize(B.h + side * turn);
+    side = vec2(-h.y, h.x);
     vec2 sr = rel - SHADOW * L * 0.5;
     lake *= 1.0 - 0.25 * hull(dot(sr, h), dot(sr, side), L, W, 0.3 * W + px);
     float x = dot(rel, h), y = dot(rel, side);
@@ -166,16 +212,16 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float px = 1.0 / iResolution.y;
     float g = clamp(dot(q - vec2(0.0, 1.0), vec2(aspect, -1.0)) / (aspect * aspect + 1.0), 0.0, 1.0);
 
-    vec2 c[BOATS], h[BOATS];
-    float L[BOATS];
-    for (int i = 0; i < BOATS; i++) c[i] = boatAt(i, aspect, h[i], L[i]);
+    Boat B[BOATS];
+    for (int i = 0; i < BOATS; i++) B[i] = boatAt(i, aspect);
 
     // The surface's slope, from its height here and a pixel over each way.
-    float z = surface(q, c, h, L);
-    vec2 slope = vec2(surface(q + vec2(px, 0.0), c, h, L) - z, surface(q + vec2(0.0, px), c, h, L) - z) / px;
+    float z = surface(q, B);
+    vec2 slope = vec2(surface(q + vec2(px, 0.0), B) - z, surface(q + vec2(0.0, px), B) - z) / px;
 
     vec3 lake = water(q, g, slope);
-    for (int i = 0; i < BOATS; i++) lake = boat(lake, q, c[i], h[i], L[i], px, i);
+    for (int i = 0; i < BOATS; i++) lake = trail(lake, q, B[i], float(i));
+    for (int i = 0; i < BOATS; i++) lake = boat(lake, q, B[i], px, i);
 
     // 1 on the background, fading to 0 as the pixel moves away from it.
     float mask = 1.0 - smoothstep(0.02, 0.2, distance(term.rgb, iBackgroundColor));
