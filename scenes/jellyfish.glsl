@@ -8,8 +8,23 @@ const float SPEED = 0.010;                    // screen heights per second, roug
 const vec3 LIGHT = vec3(0.259, 0.864, 0.432);  // from above, a little right and front
 const float CUT = -0.1;                       // where the bell's sphere is cut open
 
+// For the jellyfish's own fixed traits: small inputs, so sin() is precise.
 float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
-float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+
+// For anything whose input grows with time: Dave Hoskins' hashes without
+// sine. A sine hash fed a growing number stops being random once 32-bit
+// floats can't hold sin() of it precisely; after a few hours the specks
+// fell into a grid.
+float hash2(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+float hash3(vec3 p3) {
+    p3 = fract(p3 * 0.1031);
+    p3 += dot(p3, p3.zyx + 31.32);
+    return fract((p3.x + p3.y) * p3.z);
+}
 
 // Smooth value noise, 0 to 1.
 float noise(vec3 p) {
@@ -35,9 +50,9 @@ vec3 water(vec2 q) {
 // Specks sinking slowly, one at most per cell of a coarse grid.
 float snow(vec2 q) {
     vec2 g = q * 30.0 + vec2(0.0, iTime * 0.15);
-    float h = hash(dot(floor(g), vec2(1.0, 57.0)));
-    if (h > 0.25) return 0.0;
-    vec2 p = vec2(hash(h * 13.0), hash(h * 29.0)) * 0.8 + 0.1;
+    vec2 cell = floor(g);
+    if (hash2(cell) > 0.25) return 0.0;
+    vec2 p = vec2(hash2(cell + 0.5), hash2(cell + 7.5)) * 0.8 + 0.1;
     return (1.0 - smoothstep(0.0, 0.08, length(fract(g) - p))) * 0.5;
 }
 

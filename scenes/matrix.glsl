@@ -50,7 +50,14 @@ const ivec2 GLYPH[GLYPHS] = ivec2[GLYPHS](
     ivec2(1033761, 2184)    // wa
 );
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// Dave Hoskins' hash without sine. A sine hash goes stale as its input
+// grows with time (32-bit floats can't hold sin() of a large number
+// precisely), and the characters' ticks grow for as long as the scene runs.
+float hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
 
 // How much of glyph g covers point p of its cell (0 to 1 each way, y down).
 // The 5x7 grid sits in a 7x9 one, leaving a dot of space all round.
