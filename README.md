@@ -19,18 +19,14 @@ picker with live color previews, while keeping your text readable.
   corner, where text rarely goes; when a gradient washes out the theme's dim
   text colors, they are strengthened just enough, keeping their hue; and a
   gradient pushed past the opacity where text stays readable says so
+- **Faint text that stays legible:** shell hints and dimmed labels are made
+  just opaque enough to read over any gradient
+- **Light themes too:** text colors darken instead of lighten, and deep
+  gradients start gentler, so pale ones like `forest`, `glacier` and
+  `orchard` look great over a light background
 - **Automatic reload** with Ghostty 1.3 or later
 - **PNG export** of any gradient, for apps that take a background image
 - **macOS and Linux**
-
-The gradients, their starting opacities and the scenes are made for dark
-themes. On a light theme the readability help works in reverse, darkening
-pale text colors and warning when a gradient gets too dark, but the
-gradients themselves were chosen to look good over a dark background. Dark
-text on a darkened background is harder to read than contrast figures
-suggest, so on a light theme the checks are stricter, and the deepest
-gradients (orchid, velvet, coals and the like) start at a lower opacity
-than on a dark one. Paler ones, like forest, glacier and orchard, look good.
 
 ![The picker, previewing velvet](docs/picker.png)
 
