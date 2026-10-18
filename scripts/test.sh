@@ -44,30 +44,30 @@ warns() { bg "$@" | grep -q 'readable up to'; }   # ARGS: switching warns it's t
 light() { GHOSTTY_BG_THEME_NAME='Atom One Light' "$@"; }   # COMMAND...: run it over a light theme
 empty() { [ -z "$(ls -A "$1")" ]; }   # DIR
 pixel() { im "$1" -format "%[hex:p{$2}]" info:; }   # FILE X,Y
+# awk functions for the color checks. Colors are "#rrggbb": ch(c, i) is
+# the channel starting at i (2, 4 or 6), lum(c) the luminance in linear
+# light, as the readability math measures it.
+COLOR_AWK='
+    function hx(c, i) { return index("0123456789abcdef", tolower(substr(c, i, 1))) - 1 }
+    function ch(c, i) { return hx(c, i) * 16 + hx(c, i + 1) }
+    function lin(c, i) { v = ch(c, i) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
+    function lum(c) { return 0.2126 * lin(c, 2) + 0.7152 * lin(c, 4) + 0.0722 * lin(c, 6) }
+'
 # Palette 4 (blue) in the config is lighter than the theme's #525fb8 and
 # still has more blue in it than red or green.
 blue_still_blue() {
-    sed -n 's/^palette = 4=#//p' "$conf" | awk '{
-        r = index("0123456789abcdef", substr($1, 1, 1)) * 16; g = index("0123456789abcdef", substr($1, 3, 1)) * 16
-        b = index("0123456789abcdef", substr($1, 5, 1)) * 16
-        exit !(b > r && b > g && r + g + b > 82 + 95 + 184) }'
+    sed -n 's/^palette = 4=//p' "$conf" | awk "$COLOR_AWK"'{
+        exit !(ch($1, 6) > ch($1, 2) && ch($1, 6) > ch($1, 4) && lum($1) > lum("#525fb8")) }'
 }
 # Palette 3 (yellow) in the config is darker than the light theme's #d2b67c.
 yellow_darkened() {
-    sed -n 's/^palette = 3=#//p' "$conf" | awk '{
-        r = index("0123456789abcdef", substr($1, 1, 1)) * 16; g = index("0123456789abcdef", substr($1, 3, 1)) * 16
-        b = index("0123456789abcdef", substr($1, 5, 1)) * 16
-        exit !(r + g + b < 210 + 182 + 124) }'
+    sed -n 's/^palette = 3=//p' "$conf" | awk "$COLOR_AWK"'{ exit !(lum($1) < lum("#d2b67c")) }'
 }
 
 # Every preset in bin/ghostty-bg is angled 135 (top left to bottom right)
-# and its last color is at least as bright (in linear light, as the
-# readability math measures it) as its first.
+# and its last color is at least as bright as its first.
 bright_corner() {
-    sed -n "/^PRESETS='/,/'\$/p" bin/ghostty-bg | sed "s/^PRESETS='//; s/'\$//" | awk '
-        function hx(s, i) { return index("0123456789abcdef", tolower(substr(s, i, 1))) - 1 }
-        function lin(s, i) { v = (hx(s, i) * 16 + hx(s, i + 1)) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
-        function lum(c) { return 0.2126 * lin(c, 2) + 0.7152 * lin(c, 4) + 0.0722 * lin(c, 6) }
+    sed -n "/^PRESETS='/,/'\$/p" bin/ghostty-bg | sed "s/^PRESETS='//; s/'\$//" | awk "$COLOR_AWK"'
         { m = 0; for (i = 3; i <= NF; i++) if ($i ~ /^#/) c[++m] = $i
           if ($2 != 135 || lum(c[m]) < lum(c[1])) { print "wrong way round: " $1; bad = 1 } }
         END { exit bad }'
