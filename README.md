@@ -10,8 +10,9 @@ picker with live color previews, while keeping your text readable.
 
 - **41 gradients**, from deep (`orchid`, `velvet`, `coals`) to vivid
   (`wildfire`, `lagoon`, `prism`), still or animated with `-a`
-- **Two animated scenes:** `jellyfish`, sea nettles drifting up through deep
-  water, and `matrix`, slow, muted falling code
+- **Three animated scenes:** `jellyfish`, sea nettles drifting up through
+  deep water; `matrix`, slow, muted falling code; and, for light themes,
+  `lake`, tiny boats crossing a calm lake at golden hour, seen from above
 - **Your own images**, copied in from any format ImageMagick reads
 - **A picker** (`ghostty-bg -p`) with color swatches and a preview of each
   gradient over your theme; ctrl-t tries one without leaving it

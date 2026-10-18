@@ -145,6 +145,8 @@ check "leaving an image drops its opacity line" lacks "$conf" '^background-image
 check "a scene gets its strength put in front" has "$shaders/jellyfish-0.25.glsl" '^const float STRENGTH = 0.250;$'
 check "a scene is animated" has "$conf" '^custom-shader-animation = true$'
 glsl "a scene compiles"
+bg lake >/dev/null
+glsl "the lake scene compiles"
 
 bg glacier >/dev/null
 check "a pale gradient lifts the dim palette colors" has "$conf" '^palette = 4=#'
