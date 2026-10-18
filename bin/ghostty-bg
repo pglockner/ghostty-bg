@@ -36,7 +36,8 @@ Linux).
   -o N             opacity for this background, 0 to 1. It is remembered on
                    this machine, so each background comes back at its own
                    opacity; one that was never given an opacity starts at
-                   its gradient's own, if it has one, or else 0.25. A
+                   its gradient's own, if it has one, or else 0.25, but
+                   no higher than text stays readable over the theme. A
                    gradient set past the opacity at which text can stay
                    readable says so, and how far it can go.
   -r, --reset      forget the opacity remembered for NAME (or the active
@@ -120,6 +121,14 @@ COLOR_AWK='
     function lin(v) { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
     function enc(v) { v = v <= 0.0031308 ? v * 12.92 : 1.055 * v ^ (1 / 2.4) - 0.055; return int(v * 255 + 0.5) }
     function lum(r, g, b) { return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) }
+    function lumof(c) { return lum(ch(c, 2), ch(c, 4), ch(c, 6)) }
+    # Color A moved toward color B by F, in the encoded values, as the
+    # shader and Ghostty blend them.
+    function mix(a, b, f,    k, out) {
+        out = "#"
+        for (k = 2; k <= 6; k += 2) out = out sprintf("%02x", int(ch(a, k) + f * (ch(b, k) - ch(a, k)) + 0.5))
+        return out
+    }
     function contrast(a, b) { return a > b ? (a + 0.05) / (b + 0.05) : (b + 0.05) / (a + 0.05) }
     function ink(l) { return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? 1 : 0 }
     function nearer(a, b) { return INK ? a > b : a < b }
@@ -297,8 +306,8 @@ readable_max() {
         $1 == "foreground" { fg = $2 }
         END {
             if (bg == "") exit
-            INK = ink(lum(ch(bg, 2), ch(bg, 4), ch(bg, 6)))
-            text = INK || fg == "" ? INK : lum(ch(fg, 2), ch(fg, 4), ch(fg, 6))
+            INK = ink(lumof(bg))
+            text = INK || fg == "" ? INK : lumof(fg)
             m = split(stops, s, " ")
             for (step = 20; step >= 1; step--) {
                 o = step / 20
@@ -657,10 +666,10 @@ fit_text() {
         { n++; key[n] = $1; col[n] = $2 }
         END {
             if (bg == "") exit
-            lt = lum(ch(bg, 2), ch(bg, 4), ch(bg, 6)); INK = ink(lt); tol = allowance(tol)
+            lt = lumof(bg); INK = ink(lt); tol = allowance(tol)
             m = split(stops, s, " "); lb = nearest(bg, s, m, o, lt)
             for (i = 1; i <= n; i++) {
-                c = col[i]; L = lum(ch(c, 2), ch(c, 4), ch(c, 6))
+                c = col[i]; L = lumof(c)
                 if (!nearer(L, lt)) continue
                 want = contrast(L, lt); if (want > cap) want = cap
                 need = INK ? want * (lb + 0.05) / tol - 0.05 : (lb + 0.05) * tol / want - 0.05
@@ -685,14 +694,6 @@ fit_faint() {
     shift
     unset_conf faint-opacity
     faint="$(theme_colors | awk -v o="$opacity" -v stops="$*" -v tol="$TEXT_TOLERANCE" "$COLOR_AWK"'
-        # Color A moved toward color B by F, in the encoded values, as the
-        # shader and Ghostty blend them.
-        function mix(a, b, f,    k, out) {
-            out = "#"
-            for (k = 2; k <= 6; k += 2) out = out sprintf("%02x", int(ch(a, k) + f * (ch(b, k) - ch(a, k)) + 0.5))
-            return out
-        }
-        function lumof(c) { return lum(ch(c, 2), ch(c, 4), ch(c, 6)) }
         { v[$1] = $2 }
         END {
             bg = v["background"]; fg = v["foreground"]; base = v["faint-opacity"]
