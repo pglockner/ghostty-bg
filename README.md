@@ -38,6 +38,7 @@ brew install fzf imagemagick          # macOS
 sudo apt install fzf imagemagick      # Debian, Ubuntu
 
 git clone https://github.com/pglockner/ghostty-bg.git ~/projects/ghostty-bg
+mkdir -p ~/.local/bin
 ln -s ~/projects/ghostty-bg/bin/ghostty-bg ~/.local/bin/ghostty-bg
 ```
 

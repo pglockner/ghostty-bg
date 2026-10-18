@@ -3,8 +3,11 @@
 # has Ghostty, so the checks that read its theme are skipped there.
 name: test
 
+# Pushes to main and pull requests; a pull request's own pushes run once,
+# as the pull request.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
