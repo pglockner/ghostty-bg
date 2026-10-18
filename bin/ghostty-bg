@@ -508,6 +508,15 @@ activate_gradient() {
     fit_faint "$(opacity_of "$name")" $(colors_of "$name")
     said "$name" "$note"
     too_strong "$name"
+    follows_appearance
+}
+
+# A note when the theme follows the system appearance: the text colors fit
+# only the side in use now.
+follows_appearance() {
+    local side
+    side="$(theme_colors | awk '$1 == "appearance" { print $2 }')"
+    [ -z "$side" ] || echo "Text colors fit your theme's $side side; switch ghostty-bg again after the system appearance changes."
 }
 
 # Copy the scene NAME's shader in, with its strength put in front. A scene
@@ -618,29 +627,63 @@ theme_bg() {
 # The current theme's background, foreground and palette colors 1 to 15, as
 # "background #rrggbb", "foreground #rrggbb" and "N #rrggbb" lines, then
 # Ghostty's default faint-opacity as a "faint-opacity N" line, if this
-# Ghostty has one (from 1.2). The colors come from the theme file itself,
-# since Ghostty's own config would include what fit_text writes.
-# Themes are looked for where Ghostty keeps them: the user's own, then
-# Ghostty's resources (named by $GHOSTTY_RESOURCES_DIR inside Ghostty; next
-# to the binary otherwise: Contents/Resources in the macOS app,
+# Ghostty has one (from 1.2), and "appearance light" or "appearance dark"
+# if the theme follows the system appearance. The colors come from the
+# theme file itself, since Ghostty's own config would include what fit_text
+# writes. Themes are looked for where Ghostty keeps them: the user's own,
+# then Ghostty's resources (named by $GHOSTTY_RESOURCES_DIR inside Ghostty;
+# next to the binary otherwise: Contents/Resources in the macOS app,
 # ../share/ghostty on Linux). $GHOSTTY_BG_THEME_NAME names a theme to read
 # instead of Ghostty's own, for tests: on macOS, Ghostty always reads the
 # user's own config, so a test can't set the theme through it.
 read_theme_colors() {
-    local g name dir bin
+    local g setting name dir bin=/nonexistent
     g="$(ghostty_bin)"
-    [ -n "$g" ] || return 0
-    name="${GHOSTTY_BG_THEME_NAME:-$("$g" +show-config 2>/dev/null | sed -n 's/^theme = //p' | head -n 1)}"
-    bin="$(dirname "$(realpath "$g")")"
+    setting="$(theme_setting)"
+    name="$(theme_side "$setting")"
+    [ -n "$name" ] || return 0
+    [ -z "$g" ] || bin="$(dirname "$(realpath "$g")")"
     for dir in "${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/themes" "${GHOSTTY_RESOURCES_DIR:-/nonexistent}/themes" \
         "$bin/../Resources/ghostty/themes" "$bin/../share/ghostty/themes"; do
-        [ -n "$name" ] && [ -f "$dir/$name" ] || continue
+        [ -f "$dir/$name" ] || continue
         # "palette = 4=#525fb8" splits at both = signs: palette, 4, #525fb8.
         awk -F ' *= *' '$1 == "background" || $1 == "foreground" { print $1, $2 }
             $1 == "palette" && $2 >= 1 && $2 <= 15 { print $2, $3 }' "$dir/$name"
-        "$g" +show-config --default 2>/dev/null | awk -F ' *= *' '$1 == "faint-opacity" { print $1, $2 }'
+        [ -z "$g" ] || "$g" +show-config --default 2>/dev/null | awk -F ' *= *' '$1 == "faint-opacity" { print $1, $2 }'
+        [ "$name" = "$setting" ] || echo "appearance $(appearance)"
         return 0
     done
+}
+
+# Ghostty's theme setting: $GHOSTTY_BG_THEME_NAME if set, else Ghostty's
+# own, if Ghostty is installed.
+theme_setting() {
+    local g
+    [ -z "${GHOSTTY_BG_THEME_NAME:-}" ] || { printf '%s' "$GHOSTTY_BG_THEME_NAME"; return; }
+    g="$(ghostty_bin)"
+    [ -z "$g" ] || "$g" +show-config 2>/dev/null | sed -n 's/^theme = //p' | head -n 1
+}
+
+# The theme SETTING names: itself, or for one that follows the system
+# appearance ("light:X,dark:Y", either way round), the side in use now.
+theme_side() {
+    case "$1" in
+        light:*,dark:* | dark:*,light:*)
+            printf '%s\n' "$1" | tr ',' '\n' | sed -n "s/^ *$(appearance)://p" | head -n 1 ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+# The system appearance, light or dark, as Ghostty follows it: macOS's
+# dark mode, or the GNOME color scheme on Linux; dark if neither says.
+appearance() {
+    if [ "$(uname)" = Darwin ]; then
+        if defaults read -g AppleInterfaceStyle 2>/dev/null | grep -q Dark; then echo dark; else echo light; fi
+    elif command -v gsettings >/dev/null 2>&1; then
+        if gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null | grep -q dark; then echo dark; else echo light; fi
+    else
+        echo dark
+    fi
 }
 
 # The theme's colors as read once at the start (THEME_COLORS): every

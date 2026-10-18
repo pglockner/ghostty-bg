@@ -5,8 +5,8 @@
 # Ghostty is left alone: its config doesn't include the throwaway one, so
 # ghostty-bg doesn't signal it. The picker (-p) is interactive and not
 # covered, beyond its preview pane. Needs ImageMagick; compiles the shaders
-# too if glslangValidator is installed, and checks the text-color fitting
-# if Ghostty is. Exits non-zero if any check fails.
+# too if glslangValidator is installed, and checks faint-opacity if Ghostty
+# is. Exits non-zero if any check fails.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -27,9 +27,11 @@ conf="$state/ghostty-bg.conf"
 shaders="$state/shaders"
 opacities="$state/opacity"
 # The theme the text-color checks read: a dark one, and with light, a light
-# one.
+# one. Copies of both are in scripts/themes/, so the checks don't need
+# Ghostty itself.
 export GHOSTTY_BG_THEME_NAME='Fish Tank'
-mkdir -p "$HOME" "$state/backgrounds"
+mkdir -p "$HOME" "$state/backgrounds" "$XDG_CONFIG_HOME/ghostty"
+cp -R scripts/themes "$XDG_CONFIG_HOME/ghostty/themes"
 
 im() { if command -v magick >/dev/null 2>&1; then magick "$@"; else convert "$@"; fi; }
 im -size 64x40 gradient:navy-teal "$state/backgrounds/sample.jpg"
@@ -42,6 +44,7 @@ says() { bg "$1" | grep -q -- "$2"; }   # NAME TEXT: switching to NAME prints TE
 previews() { bg --preview "$1" | grep -q -- "$2"; }   # NAME TEXT
 warns() { bg "$@" | grep -q 'readable up to'; }   # ARGS: switching warns it's too strong
 light() { GHOSTTY_BG_THEME_NAME='Atom One Light' "$@"; }   # COMMAND...: run it over a light theme
+pair() { GHOSTTY_BG_THEME_NAME='light:Atom One Light,dark:Fish Tank' "$@"; }   # COMMAND...: over one that follows the appearance
 empty() { [ -z "$(ls -A "$1")" ]; }   # DIR
 pixel() { im "$1" -format "%[hex:p{$2}]" info:; }   # FILE X,Y
 # awk functions for the color checks. Colors are "#rrggbb": ch(c, i) is
@@ -143,29 +146,31 @@ check "a scene gets its strength put in front" has "$shaders/jellyfish-0.25.glsl
 check "a scene is animated" has "$conf" '^custom-shader-animation = true$'
 glsl "a scene compiles"
 
-# Lifting dim text reads the theme through Ghostty itself.
+bg glacier >/dev/null
+check "a pale gradient lifts the dim palette colors" has "$conf" '^palette = 4=#'
+check "a lifted color keeps its hue (blue stays bluest)" blue_still_blue
+bg jellyfish >/dev/null
+check "a scene drops the lifted colors" lacks "$conf" '^palette'
+bg orchid >/dev/null
+check "a deep gradient leaves the palette alone" lacks "$conf" '^palette'
+check "a gradient past its readable opacity warns" warns -o 1 wildfire
+check "a deep gradient at full opacity doesn't warn" fails warns -o 1 velvet
+light bg orchid >/dev/null
+check "a deep gradient on a light theme darkens its pale colors" yellow_darkened
+check "a deep gradient on a light theme warns past its readable opacity" light warns -o 1 velvet
+check "a light theme's foreground needs full contrast (orchid warns at 0.7)" light warns -o 0.7 orchid
+light bg -r orchid >/dev/null
+check "a deep gradient on a light theme starts at its readable opacity" has "$conf" '/orchid-0\.5\.glsl$'
+# faint-opacity's starting value comes from Ghostty itself.
 if command -v ghostty >/dev/null 2>&1 || [ -x /Applications/Ghostty.app/Contents/MacOS/ghostty ]; then
-    bg glacier >/dev/null
-    check "a pale gradient lifts the dim palette colors" has "$conf" '^palette = 4=#'
-    check "a lifted color keeps its hue (blue stays bluest)" blue_still_blue
-    bg jellyfish >/dev/null
-    check "a scene drops the lifted colors" lacks "$conf" '^palette'
-    bg orchid >/dev/null
-    check "a deep gradient leaves the palette alone" lacks "$conf" '^palette'
-    check "a gradient past its readable opacity warns" warns -o 1 wildfire
-    check "a deep gradient at full opacity doesn't warn" fails warns -o 1 velvet
-    light bg orchid >/dev/null
-    check "a deep gradient on a light theme darkens its pale colors" yellow_darkened
-    check "a deep gradient on a light theme warns past its readable opacity" light warns -o 1 velvet
-    check "a light theme's foreground needs full contrast (orchid warns at 0.7)" light warns -o 0.7 orchid
-    light bg -r orchid >/dev/null
-    check "a deep gradient on a light theme starts at its readable opacity" has "$conf" '/orchid-0\.5\.glsl$'
     check "a deep gradient on a light theme raises faint-opacity" has "$conf" '^faint-opacity = 0\.[6-9]'
     bg jellyfish >/dev/null
     check "a scene drops the raised faint-opacity" lacks "$conf" '^faint-opacity'
 else
-    echo "skip  text-color lifting and readability warnings (no Ghostty)"
+    echo "skip  faint-opacity (no Ghostty)"
 fi
+check "a theme that follows the system appearance says so" pair says glacier 'appearance changes'
+check "a theme that follows the system appearance gets its text fitted" has "$conf" '^palette'
 
 bg orchid >/dev/null
 cp "$conf" "$work/before.conf"
