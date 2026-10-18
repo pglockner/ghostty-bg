@@ -33,6 +33,8 @@ picker with live color previews, while keeping your text readable.
 
 ![The matrix scene behind ghostty-bg's help](docs/matrix.png)
 
+![Boats crossing the lake scene behind a README, on a light theme](docs/lake.png)
+
 ## Install
 
 Needs Ghostty and bash (3.2 or later, so macOS's own works). fzf is needed
@@ -104,7 +106,8 @@ A scene is a GLSL file in `scenes/` that defines `mainImage`, the way
 [Shadertoy](https://www.shadertoy.com) shaders do. ghostty-bg puts
 `const float STRENGTH` (the opacity) in front of it; use it, and
 `iBackgroundColor`, to tint only the background, as `scenes/matrix.glsl`
-does. `scripts/test.sh` lints ghostty-bg, runs it against a throwaway
+does. A line `// ghostty-bg starts this scene at opacity N.` starts it
+somewhere other than 0.25, as `scenes/lake.glsl` does. `scripts/test.sh` lints ghostty-bg, runs it against a throwaway
 config folder, and compiles the shaders if `glslangValidator` is installed.
 
 ## Credits

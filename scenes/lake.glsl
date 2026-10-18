@@ -4,6 +4,8 @@
 // faint spreading waves. Made for light themes. ghostty-bg puts
 // `const float STRENGTH` (the opacity) in front of this file.
 
+// ghostty-bg starts this scene at opacity 0.5.
+
 const int BOATS = 6;
 const float SPEED = 0.012;   // screen heights per second, roughly
 const float WAKE = 0.45;     // how far behind a boat its wake reaches

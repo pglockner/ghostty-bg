@@ -36,8 +36,9 @@ Linux).
   -o N             opacity for this background, 0 to 1. It is remembered on
                    this machine, so each background comes back at its own
                    opacity; one that was never given an opacity starts at
-                   its gradient's own, if it has one, or else 0.25, but
-                   no higher than text stays readable over the theme. A
+                   its gradient's or scene's own, if it has one, or else
+                   0.25, and a gradient no higher than text stays
+                   readable over the theme. A
                    gradient set past the opacity at which text can stay
                    readable says so, and how far it can go.
   -r, --reset      forget the opacity remembered for NAME (or the active
@@ -81,13 +82,14 @@ readable and keeping their hue; deep gradients leave them as they are. On
 a light theme it is the other way round: gradients darken them, deep ones
 the most. Faint text is made more opaque where it needs to be. The
 gradients and scenes are made for dark themes, though, except the lake
-scene, which is made for light ones and looks best at about 0.5.
+scene, which is made for light ones.
 
 A scene is a shader kept as scenes/NAME.glsl in ghostty-bg's own folder,
 NAME in lowercase letters. It is copied in with `const float STRENGTH` (the
 opacity) put in front, and is always animated. To add one, add a file there
 that defines mainImage and uses STRENGTH and iBackgroundColor the way the
-others do.
+others do, with a line "// ghostty-bg starts this scene at opacity N." to
+start it somewhere other than 0.25.
 USAGE
 }
 
@@ -282,13 +284,20 @@ forget_opacity() {
 
 # The opacity NAME starts at when it has none remembered: a gradient's own
 # (DEFAULT_OPACITY if its line has none), but no more than its readable
-# maximum over the current theme, and DEFAULT_OPACITY for anything else.
-# The starting opacities were chosen on dark themes; the cap brings the
-# deep gradients down on a light one.
+# maximum over the current theme; a scene's own; and DEFAULT_OPACITY for
+# anything else. The starting opacities were chosen on dark themes; the
+# cap brings the deep gradients down on a light one.
 default_opacity() {
     local start
     start="$(opacity_field "$1" 3)"
+    [ -n "$start" ] || ! is_scene "$1" || start="$(scene_opacity "$1")"
     printf '%s' "${start:-$DEFAULT_OPACITY}"
+}
+
+# The opacity scene NAME starts at, from a line in its file saying
+# "// ghostty-bg starts this scene at opacity N.": nothing if it has none.
+scene_opacity() {
+    sed -n 's|^// ghostty-bg starts this scene at opacity \([0-9.]*\)\.$|\1|p' "$SCENES/$1.glsl" | head -n 1
 }
 
 # Gradient NAME's readable maximum: nothing if the theme can't be read.

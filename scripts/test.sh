@@ -146,6 +146,7 @@ check "a scene gets its strength put in front" has "$shaders/jellyfish-0.25.glsl
 check "a scene is animated" has "$conf" '^custom-shader-animation = true$'
 glsl "a scene compiles"
 bg lake >/dev/null
+check "a scene starts at the opacity its file gives" test -e "$shaders/lake-0.5.glsl"
 glsl "the lake scene compiles"
 
 bg glacier >/dev/null
