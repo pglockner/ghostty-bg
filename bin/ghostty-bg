@@ -120,57 +120,64 @@ RESET=0
 # brighten the background and wash out dim text. Deep, saturated colors at
 # a high opacity give a vivid background that stays dark.
 #
-# From blues on, they are WezTerm's gradient presets (the colorgrad crate's
+# Each runs from top left to bottom right (135), with its brighter end at
+# the bottom right: English text starts at the left edge and output fills
+# from the top, so that corner is where text least often sits.
+#
+# From harbor on, they are WezTerm's gradient presets (the colorgrad crate's
 # ports of d3's color schemes), each sampled at five even steps along it,
-# with near-white stretches left out. Each starts at the opacity that keeps
-# its brightest color from lifting the background past a luma of about 0.33,
-# where dim text starts to wash out, up to 0.7. Six near-duplicates are left
-# out: bugn, gnbu, orrd, pubu, ylgn and ylorbr.
-PRESETS='sunset   135 #ffb347 #ff5e62 #d02fc0
-ocean    160 #2f6bff #1fb6ff #3dffd8
-forest   135 #0fa36b #5fd068 #d4f05a
-midnight 160 #5b2bff #9a4dff #ff6ad5
-graphite 135 #8a8a8a #c0c0c0 #f2f2f2
-aurora   170 #3dffa0 #22d3ee #a855f7
-ember    20  #ff3d00 #ff9100 #ffd54f 0.3
-coals    20  #a32a00 #6e1a05 #2a0c06 0.7
-glacier  150 #e0f7ff #80d0ff #5b7fff 0.3
-canyon   120 #6b1f0a #8c2f39 #0e4d4a 0.7
-orchid   135 #6a1b6e #3b1f8a #0d4a8a 0.7
-velvet   150 #7a0a3d #4b0c6b #12124a 0.7
-abyss    170 #00566b #1b1a7a #3a0a52 0.7
-blues    160 #9ec9e2 #62a7d2 #3181bd #115aa1 #08306b 0.35
-brbg     160 #543005 #af7425 #e8d098 #278980 #003c30 0.3
-bupu     160 #8d88bf #8b5fab #873896 #761174 #4d004b 0.5
-cividis  160 #002051 #3c4d6e #7f7c75 #bbaf71 #fdea45 0.25
-cool     160 #6e40aa #417de0 #1ac7c2 #40f373 #aff05b 0.3
-cubehelix 160 #000000 #182f4a #2f7137 #a07949 #d391c8 0.4
-greens   160 #97d494 #60ba6c #2f984f #0a7232 #00441b 0.35
-greys    160 #bfbfbf #919191 #646464 #323232 #000000 0.35
-inferno  160 #000004 #57106e #bc3754 #f98e09 #fcffa4 0.25
-magma    160 #000004 #4c117a #ad347c #f9795d #fdebac 0.25
-oranges  160 #fdd6af #fda55e #f16e1b #c44103 #7f2704 0.3
-piyg     160 #8e0152 #d14a96 #b6de87 #66a732 #276419 0.3
-plasma   160 #0d0887 #7e03a8 #cc4778 #f89540 #f0f921 0.25
-prgn     160 #40004b #7f418e #87c887 #308844 #00441b 0.35
-pubugn   160 #93b7d8 #509dc7 #15869b #016f64 #014636 0.35
-puor     160 #2d004b #6f549d #fbbf74 #cd7211 #7f3b08 0.3
-purd     160 #cf8dc4 #e151a3 #d71c6c #a30545 #67001f 0.4
-purples  160 #8b87bf #7566ae #63449d #501f8c #3f007d 0.5
-rainbow  160 #6e40aa #ff5e63 #aff05b #1ac7c2 #6e40aa 0.3
-rdbu     160 #67001f #cb4a44 #f8bfa4 #3b86bc #053061 0.3
-rdgy     160 #67001f #cb4a44 #f7ba9e #757575 #1a1a1a 0.3
-rdpu     160 #fbafba #f46da4 #cf268f #8d0179 #49006a 0.35
-rdylbu   160 #a50026 #ef6740 #fed487 #70a6cd #313695 0.3
-rdylgn   160 #a50026 #f88d52 #f9f7ae #85cb67 #006837 0.25
-reds     160 #fdc7b1 #fc8767 #ee4231 #bb151a #67000d 0.3
-sinebow  160 #ff4040 #7fee11 #00bfbf #7f11ee #ff4040 0.3
-spectral 160 #9e0142 #f5814e #feeea3 #75c5a7 #5e4fa2 0.25
-turbo    160 #23171b #26bce1 #95fb51 #ff821d #900c00 0.3
-viridis  160 #440154 #3b528b #21918c #5ec962 #fde725 0.3
-warm     160 #6e40aa #d23ea7 #ff5e63 #efa72f #aff05b 0.3
-ylgnbu   160 #94d5b9 #41b1c2 #217eb7 #224197 #081d58 0.3
-ylorrd   160 #fff3b0 #fec662 #fd7836 #dc1820 #800026 0.25'
+# with near-white stretches left out, and renamed from the schemes'
+# abbreviations: harbor blues, estuary brbg, plum bupu, lamplight cividis,
+# reef cool, helix cubehelix, moss greens, amber oranges, thistle prgn,
+# fjord pubugn, dusk puor, berry purd, amethyst purples, prism rainbow,
+# tidal rdbu, smolder rdgy, fuchsia rdpu, solstice rdylbu, orchard rdylgn,
+# crimson reds, neon sinebow, thermal turbo, lagoon viridis, tropic warm,
+# seaglass ylgnbu, wildfire ylorrd. Each starts at the opacity that keeps
+# its brightest color from lifting the background past a luma of about
+# 0.33, where dim text starts to wash out, up to 0.7 (amber at 0.6, by
+# preference). Left out as near-duplicates or not to taste: bugn, gnbu,
+# greys, magma, orrd, piyg, plasma, pubu, ylgn and ylorbr.
+PRESETS='sunset    135 #d02fc0 #ff5e62 #ffb347
+ocean     135 #2f6bff #1fb6ff #3dffd8
+forest    135 #0fa36b #5fd068 #d4f05a
+midnight  135 #5b2bff #9a4dff #ff6ad5
+graphite  135 #8a8a8a #c0c0c0 #f2f2f2
+aurora    135 #a855f7 #22d3ee #3dffa0
+ember     135 #ff3d00 #ff9100 #ffd54f 0.3
+coals     135 #2a0c06 #6e1a05 #a32a00 0.7
+glacier   135 #5b7fff #80d0ff #e0f7ff 0.3
+canyon    135 #6b1f0a #8c2f39 #0e4d4a 0.7
+orchid    135 #6a1b6e #3b1f8a #0d4a8a 0.7
+velvet    135 #12124a #4b0c6b #7a0a3d 0.7
+abyss     135 #3a0a52 #1b1a7a #00566b 0.7
+harbor    135 #08306b #115aa1 #3181bd #62a7d2 #9ec9e2 0.35
+estuary   135 #003c30 #278980 #e8d098 #af7425 #543005 0.3
+plum      135 #4d004b #761174 #873896 #8b5fab #8d88bf 0.5
+lamplight 135 #002051 #3c4d6e #7f7c75 #bbaf71 #fdea45 0.25
+reef      135 #6e40aa #417de0 #1ac7c2 #40f373 #aff05b 0.3
+helix     135 #000000 #182f4a #2f7137 #a07949 #d391c8 0.4
+moss      135 #00441b #0a7232 #2f984f #60ba6c #97d494 0.35
+inferno   135 #000004 #57106e #bc3754 #f98e09 #fcffa4 0.25
+amber     135 #7f2704 #c44103 #f16e1b #fda55e #fdd6af 0.6
+thistle   135 #40004b #7f418e #87c887 #308844 #00441b 0.35
+fjord     135 #014636 #016f64 #15869b #509dc7 #93b7d8 0.35
+dusk      135 #2d004b #6f549d #fbbf74 #cd7211 #7f3b08 0.3
+berry     135 #67001f #a30545 #d71c6c #e151a3 #cf8dc4 0.4
+amethyst  135 #3f007d #501f8c #63449d #7566ae #8b87bf 0.5
+prism     135 #6e40aa #ff5e63 #aff05b #1ac7c2 #6e40aa 0.3
+tidal     135 #67001f #cb4a44 #f8bfa4 #3b86bc #053061 0.3
+smolder   135 #1a1a1a #757575 #f7ba9e #cb4a44 #67001f 0.3
+fuchsia   135 #49006a #8d0179 #cf268f #f46da4 #fbafba 0.35
+solstice  135 #313695 #70a6cd #fed487 #ef6740 #a50026 0.3
+orchard   135 #a50026 #f88d52 #f9f7ae #85cb67 #006837 0.25
+crimson   135 #67000d #bb151a #ee4231 #fc8767 #fdc7b1 0.3
+neon      135 #ff4040 #7fee11 #00bfbf #7f11ee #ff4040 0.3
+spectral  135 #9e0142 #f5814e #feeea3 #75c5a7 #5e4fa2 0.25
+thermal   135 #23171b #26bce1 #95fb51 #ff821d #900c00 0.3
+lagoon    135 #440154 #3b528b #21918c #5ec962 #fde725 0.3
+tropic    135 #6e40aa #d23ea7 #ff5e63 #efa72f #aff05b 0.3
+seaglass  135 #081d58 #224197 #217eb7 #41b1c2 #94d5b9 0.3
+wildfire  135 #800026 #dc1820 #fd7836 #fec662 #fff3b0 0.25'
 
 preset() { printf '%s\n' "$PRESETS" | awk -v n="$1" '$1 == n'; }
 

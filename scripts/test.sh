@@ -52,6 +52,19 @@ blue_still_blue() {
         exit !(b > r && b > g && r + g + b > 82 + 95 + 184) }'
 }
 
+# Every preset in bin/ghostty-bg is angled 135 (top left to bottom right)
+# and its last color is at least as bright (in linear light, as the
+# readability math measures it) as its first.
+bright_corner() {
+    sed -n "/^PRESETS='/,/'\$/p" bin/ghostty-bg | sed "s/^PRESETS='//; s/'\$//" | awk '
+        function hx(s, i) { return index("0123456789abcdef", tolower(substr(s, i, 1))) - 1 }
+        function lin(s, i) { v = (hx(s, i) * 16 + hx(s, i + 1)) / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
+        function lum(c) { return 0.2126 * lin(c, 2) + 0.7152 * lin(c, 4) + 0.0722 * lin(c, 6) }
+        { m = 0; for (i = 3; i <= NF; i++) if ($i ~ /^#/) c[++m] = $i
+          if ($2 != 135 || lum(c[m]) < lum(c[1])) { print "wrong way round: " $1; bad = 1 } }
+        END { exit bad }'
+}
+
 # The shader with a stand-in for the header Ghostty puts in front of it.
 compiles() {
     {
@@ -82,13 +95,14 @@ glsl() {
 }
 
 check "a config Ghostty doesn't include says how to add it" says ember "doesn't include"
+check "every gradient runs to its brighter end at the bottom right" bright_corner
 
 bg orchid >/dev/null
 check "a gradient starts at its preset's opacity" test -e "$shaders/orchid-0.7.glsl"
 check "a still gradient isn't animated" has "$conf" '^custom-shader-animation = false$'
 
-bg -a turbo >/dev/null
-check "a five-color preset gives a five-color shader" has "$shaders/turbo-0.3-animated.glsl" '^const int N = 5;$'
+bg -a thermal >/dev/null
+check "a five-color preset gives a five-color shader" has "$shaders/thermal-0.3-animated.glsl" '^const int N = 5;$'
 glsl "an animated five-color shader compiles"
 
 bg -a sunset >/dev/null
@@ -130,7 +144,7 @@ if command -v ghostty >/dev/null 2>&1 || [ -x /Applications/Ghostty.app/Contents
     check "a scene drops the lifted colors" lacks "$conf" '^palette'
     bg orchid >/dev/null
     check "a deep gradient leaves the palette alone" lacks "$conf" '^palette'
-    check "a gradient past its readable opacity warns" warns -o 1 ylorrd
+    check "a gradient past its readable opacity warns" warns -o 1 wildfire
     check "a deep gradient at full opacity doesn't warn" fails warns -o 1 velvet
 else
     echo "skip  text-color lifting and readability warnings (no Ghostty)"
