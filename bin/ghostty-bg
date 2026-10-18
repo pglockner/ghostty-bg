@@ -1,0 +1,883 @@
+#!/usr/bin/env bash
+# ghostty-bg -- switch Ghostty's background between images, gradients and
+# animated scenes. Its state lives in ~/.config/ghostty-bg/ (under
+# $XDG_CONFIG_HOME if set): ghostty-bg.conf, which the user's Ghostty config
+# includes and which names the background in use; shaders/, holding the
+# shader for a gradient or scene; opacity, the opacity remembered for each
+# background; and backgrounds/, the images (or the folder $GHOSTTY_BG_IMAGES
+# names). Scenes come with ghostty-bg, in its scenes/ folder. Runs on macOS
+# and Linux, with bash 3.2 (macOS's own) or later.
+set -euo pipefail
+
+usage() {
+    cat <<'USAGE'
+Usage: ghostty-bg                        list the backgrounds, active one starred
+       ghostty-bg -p                     pick one from a list with previews
+       ghostty-bg [-o N] NAME            switch to a saved image
+       ghostty-bg [-o N] [-a] GRADIENT   switch to a gradient
+       ghostty-bg [-o N] SCENE           switch to an animated scene
+       ghostty-bg [-o N] FILE [NAME]     copy an image in as NAME (default: a
+                                         short name from its file name) and
+                                         switch to it
+       ghostty-bg -o N                   change the active background's opacity
+       ghostty-bg -r [NAME]              back to its starting opacity
+       ghostty-bg -R                     every background back to its own
+       ghostty-bg --png GRADIENT         save a gradient as an image
+
+Switching writes ~/.config/ghostty-bg/ghostty-bg.conf. Include it from
+Ghostty's config with this line (the ? lets Ghostty start without it):
+
+    config-file = ?~/.config/ghostty-bg/ghostty-bg.conf
+
+A running Ghostty 1.3 or later that includes it is then told to reload its
+config; otherwise reload it by hand (cmd-shift-, on macOS, ctrl-shift-, on
+Linux).
+
+  -o N             opacity for this background, 0 to 1. It is remembered on
+                   this machine, so each background comes back at its own
+                   opacity; one that was never given an opacity starts at
+                   its gradient's own, if it has one, or else 0.25. A
+                   gradient set past the opacity at which text can stay
+                   readable says so, and how far it can go.
+  -r, --reset      forget the opacity remembered for NAME (or the active
+                   background) and switch to it at its starting opacity.
+  -R, --reset-all  forget every remembered opacity, and put the active
+                   background back at its starting opacity.
+  -p, --pick       choose a background in fzf, which shows each gradient's
+                   colors and how it will look over the theme's background,
+                   then asks for its opacity (enter keeps it) and, for a
+                   gradient, whether it moves. Needs fzf.
+                   ctrl-s on a gradient saves it as an image instead,
+                   like --png. ctrl-t tries the highlighted background
+                   without leaving the picker; esc puts back the one that
+                   was in use.
+  -i, --png        save the gradient GRADIENT as a 3840x2160 PNG image in
+                   ~/Pictures/ghostty-bg/ instead of switching to it, for
+                   apps that take a background image (atrium, iTerm2).
+                   Its colors are at full strength, so use the app's own
+                   opacity setting.
+  -a, --animated   make the gradient's colors flow along it, wrapping round
+                   from the last to the first. Not remembered: the next
+                   switch without it is still again, though changing only
+                   the opacity keeps it. Ghostty redraws the focused
+                   terminal continuously while it runs.
+
+Images are kept as NAME.jpg in ~/.config/ghostty-bg/backgrounds/, or in the
+folder $GHOSTTY_BG_IMAGES names (a link to a synced folder works too). FILE
+can be any image ImageMagick reads. It is copied, not moved: converted to JPEG,
+metadata stripped, and shrunk to fit 3840x3840 if larger. Without a NAME it
+gets its file name cut to 16 characters, numbered if that is taken. An
+existing image is never overwritten -- Ghostty only reloads a background
+when its path changes -- so a NAME already in use is refused. To remove an
+image, delete its file.
+
+A gradient is drawn by a shader that tints the theme's background color
+and leaves text alone. The shader is written to ~/.config/ghostty-bg/shaders/,
+which holds only the gradient or scene in use. When a gradient makes the
+background bright enough to wash out the theme's dim text colors, those
+palette colors are lightened in ghostty-bg.conf, just enough to stay
+readable and keeping their hue; deep gradients leave them as they are.
+
+A scene is a shader kept as scenes/NAME.glsl in ghostty-bg's own folder,
+NAME in lowercase letters. It is copied in with `const float STRENGTH` (the
+opacity) put in front, and is always animated. To add one, add a file there
+that defines mainImage and uses STRENGTH and iBackgroundColor the way the
+others do.
+USAGE
+}
+
+die() { echo "ghostty-bg: $*" >&2; exit 1; }
+
+# ghostty-bg's own folder, through any link to this script.
+REPO="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+SCENES="$REPO/scenes"
+STATE="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty-bg"
+# The background lines go here, for Ghostty's config to include.
+CONF="$STATE/ghostty-bg.conf"
+DIR="${GHOSTTY_BG_IMAGES:-$STATE/backgrounds}"
+SHADERS="$STATE/shaders"
+# One "NAME OPACITY" line per background that has been given an opacity.
+OPACITIES="$STATE/opacity"
+# Where --png puts gradients rendered as images.
+PNGS="$HOME/Pictures/ghostty-bg"
+DEFAULT_OPACITY=0.25
+# How fit_text keeps text readable over a gradient: the contrast to aim for
+# at most (WCAG's AA level), and how much of it a background may cost before
+# anything changes (orchid and velvet, at 0.7, stay within it).
+TEXT_CONTRAST=4.5
+TEXT_TOLERANCE=1.5
+OPACITY=
+ANIMATED=0
+PICK=0
+PNG=0
+RESET=0
+
+# Gradients, one per line: name (one word), angle (CSS-style: 180 runs top
+# to bottom, 135 toward the bottom right), two or more colors from start to
+# end, then optionally the opacity it starts at. The shader blends the theme's
+# background toward the gradient, so bright colors work at a low opacity,
+# where a dark gradient would vanish into a dark theme, but pale ones
+# brighten the background and wash out dim text. Deep, saturated colors at
+# a high opacity give a vivid background that stays dark.
+#
+# From blues on, they are WezTerm's gradient presets (the colorgrad crate's
+# ports of d3's color schemes), each sampled at five even steps along it,
+# with near-white stretches left out. Each starts at the opacity that keeps
+# its brightest color from lifting the background past a luma of about 0.33,
+# where dim text starts to wash out, up to 0.7. Six near-duplicates are left
+# out: bugn, gnbu, orrd, pubu, ylgn and ylorbr.
+PRESETS='sunset   135 #ffb347 #ff5e62 #d02fc0
+ocean    160 #2f6bff #1fb6ff #3dffd8
+forest   135 #0fa36b #5fd068 #d4f05a
+midnight 160 #5b2bff #9a4dff #ff6ad5
+graphite 135 #8a8a8a #c0c0c0 #f2f2f2
+aurora   170 #3dffa0 #22d3ee #a855f7
+ember    20  #ff3d00 #ff9100 #ffd54f 0.3
+coals    20  #a32a00 #6e1a05 #2a0c06 0.7
+glacier  150 #e0f7ff #80d0ff #5b7fff 0.3
+canyon   120 #6b1f0a #8c2f39 #0e4d4a 0.7
+orchid   135 #6a1b6e #3b1f8a #0d4a8a 0.7
+velvet   150 #7a0a3d #4b0c6b #12124a 0.7
+abyss    170 #00566b #1b1a7a #3a0a52 0.7
+blues    160 #9ec9e2 #62a7d2 #3181bd #115aa1 #08306b 0.35
+brbg     160 #543005 #af7425 #e8d098 #278980 #003c30 0.3
+bupu     160 #8d88bf #8b5fab #873896 #761174 #4d004b 0.5
+cividis  160 #002051 #3c4d6e #7f7c75 #bbaf71 #fdea45 0.25
+cool     160 #6e40aa #417de0 #1ac7c2 #40f373 #aff05b 0.3
+cubehelix 160 #000000 #182f4a #2f7137 #a07949 #d391c8 0.4
+greens   160 #97d494 #60ba6c #2f984f #0a7232 #00441b 0.35
+greys    160 #bfbfbf #919191 #646464 #323232 #000000 0.35
+inferno  160 #000004 #57106e #bc3754 #f98e09 #fcffa4 0.25
+magma    160 #000004 #4c117a #ad347c #f9795d #fdebac 0.25
+oranges  160 #fdd6af #fda55e #f16e1b #c44103 #7f2704 0.3
+piyg     160 #8e0152 #d14a96 #b6de87 #66a732 #276419 0.3
+plasma   160 #0d0887 #7e03a8 #cc4778 #f89540 #f0f921 0.25
+prgn     160 #40004b #7f418e #87c887 #308844 #00441b 0.35
+pubugn   160 #93b7d8 #509dc7 #15869b #016f64 #014636 0.35
+puor     160 #2d004b #6f549d #fbbf74 #cd7211 #7f3b08 0.3
+purd     160 #cf8dc4 #e151a3 #d71c6c #a30545 #67001f 0.4
+purples  160 #8b87bf #7566ae #63449d #501f8c #3f007d 0.5
+rainbow  160 #6e40aa #ff5e63 #aff05b #1ac7c2 #6e40aa 0.3
+rdbu     160 #67001f #cb4a44 #f8bfa4 #3b86bc #053061 0.3
+rdgy     160 #67001f #cb4a44 #f7ba9e #757575 #1a1a1a 0.3
+rdpu     160 #fbafba #f46da4 #cf268f #8d0179 #49006a 0.35
+rdylbu   160 #a50026 #ef6740 #fed487 #70a6cd #313695 0.3
+rdylgn   160 #a50026 #f88d52 #f9f7ae #85cb67 #006837 0.25
+reds     160 #fdc7b1 #fc8767 #ee4231 #bb151a #67000d 0.3
+sinebow  160 #ff4040 #7fee11 #00bfbf #7f11ee #ff4040 0.3
+spectral 160 #9e0142 #f5814e #feeea3 #75c5a7 #5e4fa2 0.25
+turbo    160 #23171b #26bce1 #95fb51 #ff821d #900c00 0.3
+viridis  160 #440154 #3b528b #21918c #5ec962 #fde725 0.3
+warm     160 #6e40aa #d23ea7 #ff5e63 #efa72f #aff05b 0.3
+ylgnbu   160 #94d5b9 #41b1c2 #217eb7 #224197 #081d58 0.3
+ylorrd   160 #fff3b0 #fec662 #fd7836 #dc1820 #800026 0.25'
+
+preset() { printf '%s\n' "$PRESETS" | awk -v n="$1" '$1 == n'; }
+
+# The colors of gradient NAME, one per line.
+colors_of() { preset "$1" | awk '{ for (i = 3; i <= NF; i++) if ($i ~ /^#/) print $i }'; }
+
+# The opacity gradient NAME starts at, if its line ends with one.
+start_opacity() { preset "$1" | awk 'NF > 2 && $NF !~ /^#/ { print $NF }'; }
+
+# Lowercase, with every run of other characters squeezed to one dash.
+slug() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-//; s/-$//'
+}
+
+# The repo's DIR as the config should name it: under ~ where possible, so
+# the same line works on both Macs.
+shown() {
+    case "$1" in "$HOME"/*) printf '%s' "~${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac
+}
+
+# Run the sed program $1 over the config, through a temporary file, since
+# sed -i takes different arguments on macOS and Linux.
+edit_conf() { sed "$1" "$CONF" >"$CONF.tmp" && mv "$CONF.tmp" "$CONF"; }
+
+# Set KEY = VALUE in the config, replacing its line or adding one.
+set_conf() {
+    local key=$1 value=$2
+    if grep -q "^$key = " "$CONF"; then
+        edit_conf "s|^$key = .*|$key = $value|"
+    else
+        printf '%s = %s\n' "$key" "$value" >>"$CONF"
+    fi
+}
+
+unset_conf() { edit_conf "/^$1 = /d"; }
+
+# The name of the background the config points at, if it is one of ours. A
+# shader's file is GRADIENT-OPACITY[-animated].glsl.
+active() {
+    sed -n -e 's|^custom-shader = .*/\([a-z]*\)-[^/]*\.glsl$|\1|p' \
+        -e 's|^background-image = .*/\(.*\)\.jpg$|\1|p' "$CONF" | head -n 1
+}
+
+opacity_of() {
+    local found
+    found="$(awk -v n="$1" '$1 == n { print $2 }' "$OPACITIES" 2>/dev/null || true)"
+    [ -n "$found" ] || found="$(start_opacity "$1")"
+    printf '%s' "${found:-$DEFAULT_OPACITY}"
+}
+
+remember_opacity() {
+    local name=$1 value=$2 rest
+    rest="$(awk -v n="$name" '$1 != n' "$OPACITIES" 2>/dev/null || true)"
+    printf '%s\n' "$rest" "$name $value" | sed '/^$/d' | sort >"$OPACITIES"
+}
+
+# Drop NAME's remembered opacity, so it goes back to its starting one.
+forget_opacity() {
+    local rest
+    rest="$(awk -v n="$1" '$1 != n' "$OPACITIES" 2>/dev/null || true)"
+    printf '%s\n' "$rest" | sed '/^$/d' >"$OPACITIES"
+}
+
+# The opacity NAME starts at when it has none remembered.
+default_opacity() {
+    local start
+    start="$(start_opacity "$1")"
+    printf '%s' "${start:-$DEFAULT_OPACITY}"
+}
+
+# The highest opacity, in steps of 0.05, at which gradient NAME leaves white
+# text TEXT_CONTRAST / TEXT_TOLERANCE (3:1) against its brightest point:
+# past it, even fit_text's lightest colors wash out. 1 for gradients that
+# never get that bright; nothing if the theme can't be read.
+readable_max() {
+    theme_colors | awk -v stops="$(colors_of "$1" | tr '\n' ' ')" \
+        -v floor="$(awk -v c="$TEXT_CONTRAST" -v t="$TEXT_TOLERANCE" 'BEGIN { print c / t }')" '
+        function hx(s, i) { return index("0123456789abcdef", tolower(substr(s, i, 1))) - 1 }
+        function ch(c, i) { return hx(c, i) * 16 + hx(c, i + 1) }
+        function lin(v) { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
+        $1 == "background" { bg = $2 }
+        END {
+            if (bg == "") exit
+            m = split(stops, s, " ")
+            for (step = 20; step >= 1; step--) {
+                o = step / 20; lb = 0
+                for (i = 1; i <= m; i++) {
+                    l = 0
+                    for (k = 2; k <= 6; k += 2) {
+                        w = (k == 2) ? 0.2126 : (k == 4) ? 0.7152 : 0.0722
+                        l += w * lin(ch(bg, k) + o * (ch(s[i], k) - ch(bg, k)))
+                    }
+                    if (l > lb) lb = l
+                }
+                if (1.05 / (lb + 0.05) >= floor) { print o; exit }
+            }
+            print 0.05
+        }'
+}
+
+# A warning when gradient NAME's opacity is past its readable maximum.
+too_bright() {
+    local max
+    max="$(readable_max "$1")"
+    [ -n "$max" ] || return 0
+    awk -v o="$(opacity_of "$1")" -v m="$max" 'BEGIN { exit !(o > m) }' || return 0
+    echo "Too bright for text to stay readable: $1 is readable up to $max (ghostty-bg -o $max $1, or -r $1 for its default $(default_opacity "$1"))."
+}
+
+# "#2f6bff" as "47 107 255".
+rgb_of() {
+    local h=${1#\#}
+    printf '%d %d %d' "$((16#${h:0:2}))" "$((16#${h:2:2}))" "$((16#${h:4:2}))"
+}
+
+# "#2f6bff" as a GLSL color.
+vec3() {
+    # shellcheck disable=SC2046
+    set -- $(rgb_of "$1")
+    awk -v r="$1" -v g="$2" -v b="$3" 'BEGIN { printf "vec3(%.3f, %.3f, %.3f)", r / 255, g / 255, b / 255 }'
+}
+
+# N colors evenly spaced along a gradient through the colors given, first
+# to last, as "r g b" lines of 0 to 255, interpolated the way the shader
+# does it.
+ramp() {
+    local n=$1 c stops=""
+    shift
+    for c in "$@"; do stops="$stops $(rgb_of "$c")"; done
+    awk -v n="$n" -v stops="$stops" 'BEGIN {
+        m = split(stops, v, " ") / 3
+        for (x = 0; x < n; x++) {
+            s = (n > 1 ? x / (n - 1) : 0) * (m - 1); i = int(s); f = s - i
+            if (i >= m - 1) { i = m - 2; f = 1 }
+            for (k = 1; k <= 3; k++) {
+                a = v[i * 3 + k]; b = v[(i + 1) * 3 + k]
+                printf "%s%.2f", (k > 1 ? " " : ""), a + (b - a) * f
+            }
+            print ""
+        }
+    }'
+}
+
+# Ghostty hands a shader the finished screen, text included, so the gradient
+# is added only where a pixel is close to the theme's background color.
+write_shader() {
+    local out=$1 angle=$2 strength=$3 speed=$4 c i=0 sep colors=""
+    shift 4
+    for c in "$@"; do
+        i=$((i + 1))
+        sep=','
+        [ "$i" -lt "$#" ] || sep=' '
+        colors="$colors    $(vec3 "$c")$sep // $c
+"
+    done
+    cat >"$out" <<GLSL
+// Written by ghostty-bg; edit the presets there, not this file.
+const int N = $#;
+const vec3 COLORS[N] = vec3[N](
+$colors);
+const float ANGLE = $angle.0;     // CSS-style degrees
+const float STRENGTH = $strength;  // how much shows over the background
+const float SPEED = $speed;      // palette cycles per second
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = fragCoord / iResolution.xy;
+    vec4 term = texture(iChannel0, uv);
+
+    // Position along the gradient, 0 at the start corner and 1 at the end.
+    // Ghostty's y runs downward.
+    float a = radians(ANGLE);
+    vec2 dir = vec2(sin(a), -cos(a));
+    float t = dot(uv - 0.5, dir) / (abs(dir.x) + abs(dir.y)) + 0.5;
+
+    // The palette is a loop, first to last and back to the first, and the
+    // screen shows all but its last step: first to last when still. Time
+    // slides that window round.
+    float s = fract(t * float(N - 1) / float(N) - iTime * SPEED) * float(N);
+    int i = int(s);
+    vec3 grad = mix(COLORS[i], COLORS[(i + 1) % N], fract(s));
+
+    // A little noise, under one color step, hides banding.
+    grad += (fract(sin(dot(fragCoord, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+
+    // 1 on the background, fading to 0 as the pixel moves away from it.
+    float mask = 1.0 - smoothstep(0.02, 0.2, distance(term.rgb, iBackgroundColor));
+
+    fragColor = vec4(term.rgb + (grad - iBackgroundColor) * STRENGTH * mask, term.a);
+}
+GLSL
+}
+
+said() {
+    local msg
+    msg="Background: $1 at $(opacity_of "$1")$2."
+    if ! in_use; then
+        echo "$msg Ghostty's config doesn't include $(shown "$CONF") yet; ghostty-bg -h shows the line to add."
+    elif reload_ghostty; then
+        echo "$msg Ghostty reloaded."
+    else
+        echo "$msg Reload Ghostty ($(reload_key)) to apply."
+    fi
+}
+
+reload_key() { if [ "$(uname)" = Darwin ]; then echo cmd-shift-,; else echo ctrl-shift-,; fi; }
+
+# Whether Ghostty's config includes this ghostty-bg.conf. Ghostty lists its
+# config-file lines with ~ expanded and a leading ? kept. A different one
+# (a test's, say) leaves Ghostty alone.
+in_use() {
+    local g
+    g="$(ghostty_bin)"
+    [ -n "$g" ] || return 1
+    "$g" +show-config 2>/dev/null | sed -n 's/^config-file = ?\{0,1\}//p' | grep -qxF "$CONF"
+}
+
+# Ghostty's command-line binary, or nothing if it isn't installed.
+ghostty_bin() {
+    local g
+    g="$(command -v ghostty || echo /Applications/Ghostty.app/Contents/MacOS/ghostty)"
+    [ -x "$g" ] || return 0
+    printf '%s' "$g"
+}
+
+# Have a running Ghostty reload its config, which it does on SIGUSR2. Seen
+# working in 1.3.1; an older one could quit on the signal instead, so it is
+# only sent from 1.3 on. On macOS, pgrep skips its own ancestors unless
+# given -a, and when this runs inside Ghostty, Ghostty is one (macOS's pkill
+# has no -a, hence pgrep and kill). Linux's pgrep doesn't skip them, and
+# its -a means something else. Fails if nothing was sent.
+reload_ghostty() {
+    local g pids
+    g="$(ghostty_bin)"
+    [ -n "$g" ] || return 1
+    "$g" --version 2>/dev/null | awk 'NR == 1 { split($2, v, "."); ok = v[1] > 1 || (v[1] == 1 && v[2] >= 3) } END { exit !ok }' || return 1
+    if [ "$(uname)" = Darwin ]; then
+        pids="$(pgrep -a -x ghostty)" || return 1
+    else
+        pids="$(pgrep -x ghostty)" || return 1
+    fi
+    # shellcheck disable=SC2086
+    kill -USR2 $pids 2>/dev/null
+}
+
+# ImageMagick: version 7's magick, or version 6's convert.
+im() {
+    if command -v magick >/dev/null 2>&1; then
+        magick "$@"
+    elif command -v convert >/dev/null 2>&1; then
+        convert "$@"
+    else
+        die "needs ImageMagick: brew install imagemagick, or the imagemagick package on Linux"
+    fi
+}
+
+# Point the config at the image NAME, at the opacity given with -o or else
+# its own.
+activate_image() {
+    local name=$1
+    [ "$ANIMATED" -eq 0 ] || die "only gradients can be animated"
+    [ -z "$OPACITY" ] || remember_opacity "$name" "$OPACITY"
+    rm -f "$SHADERS"/*.glsl
+    unset_conf custom-shader
+    unset_conf custom-shader-animation
+    set_conf background-image "$(shown "$DIR")/$name.jpg"
+    set_conf background-image-opacity "$(opacity_of "$name")"
+    unset_conf palette
+    said "$name" ""
+}
+
+# Write the gradient NAME's shader and point the config at it. The opacity
+# and the animation are in the file's name because Ghostty reloads a shader
+# only when its path changes.
+activate_gradient() {
+    local name=$1 angle file speed=0.0 animation=false note=""
+    angle="$(preset "$name" | awk '{ print $2 }')"
+    [ -z "$OPACITY" ] || remember_opacity "$name" "$OPACITY"
+    file="$name-$(opacity_of "$name")"
+    if [ "$ANIMATED" -eq 1 ]; then
+        file="$file-animated" speed=0.025 animation=true note=", animated"
+    fi
+    # The colors are words with no spaces, so they split cleanly.
+    # shellcheck disable=SC2046
+    write_shader "$(new_shader "$file")" "$angle" "$(strength "$name")" "$speed" $(colors_of "$name")
+    use_shader "$file" "$animation"
+    # shellcheck disable=SC2046
+    fit_text "$(opacity_of "$name")" $(colors_of "$name")
+    said "$name" "$note"
+    too_bright "$name"
+}
+
+# Copy the scene NAME's shader in, with its strength put in front. A scene
+# always moves, so it is always animated.
+activate_scene() {
+    local name=$1 file
+    [ -z "$OPACITY" ] || remember_opacity "$name" "$OPACITY"
+    file="$name-$(opacity_of "$name")"
+    {
+        echo "// Written by ghostty-bg from its scenes/$name.glsl; edit that, not this file."
+        echo "const float STRENGTH = $(strength "$name");"
+        cat "$SCENES/$name.glsl"
+    } >"$(new_shader "$file")"
+    use_shader "$file" true
+    unset_conf palette
+    said "$name" ", animated"
+}
+
+# The path for shader FILE, after clearing out the one in use.
+new_shader() {
+    mkdir -p "$SHADERS"
+    rm -f "$SHADERS"/*.glsl
+    printf '%s' "$SHADERS/$1.glsl"
+}
+
+# Point the config at shader FILE, animated or not.
+use_shader() {
+    unset_conf background-image
+    unset_conf background-image-opacity
+    set_conf custom-shader "$(shown "$SHADERS")/$1.glsl"
+    set_conf custom-shader-animation "$2"
+}
+
+# NAME's opacity as a shader's STRENGTH.
+strength() { awk -v o="$(opacity_of "$1")" 'BEGIN { printf "%.3f", o }'; }
+
+is_scene() { [ -e "$SCENES/$1.glsl" ]; }
+
+activate() {
+    if [ -e "$DIR/$1.jpg" ]; then activate_image "$1"
+    elif is_scene "$1"; then activate_scene "$1"
+    else activate_gradient "$1"; fi
+}
+
+# Without a NAME the file's own name is used, cut to 16 characters and
+# numbered if that is taken.
+import() {
+    local src=$1 name base n=2
+    [ "$ANIMATED" -eq 0 ] || die "only gradients can be animated"
+    if [ -n "${2:-}" ]; then
+        name="$(slug "$2")"
+        [ -n "$name" ] || die "can't make a name from '$2'"
+        [ ! -e "$DIR/$name.jpg" ] || die "'$name' already exists; pass another name"
+    else
+        base="$(slug "$(basename "${src%.*}")" | cut -c1-16)"
+        base="${base%-}"
+        name="${base:=image}"
+        while [ -e "$DIR/$name.jpg" ]; do name="$base-$n"; n=$((n + 1)); done
+    fi
+    [ -z "$(preset "$name")" ] || die "'$name' is a gradient's name; pass another name"
+    ! is_scene "$name" || die "'$name' is a scene's name; pass another name"
+    im "${src}[0]" -auto-orient -strip -resize '3840x3840>' -quality 85 "$DIR/$name.jpg"
+    activate_image "$name"
+}
+
+# The base names of the files matching a glob, one per line.
+names() { for f in "$@"; do [ -e "$f" ] && basename "${f%.*}"; done; }
+
+# A HEADING and, under it, the NAMES (one per line) with their opacities,
+# the ACTIVE one starred. An empty section prints nothing.
+section() {
+    local heading=$1 names=$2 current=$3 name mark
+    [ -n "$names" ] || return 0
+    printf '%s\n' "$heading"
+    printf '%s\n' "$names" | sort | while IFS= read -r name; do
+        mark=' '
+        [ "$name" != "$current" ] || mark='*'
+        printf '%s %-20s %s\n' "$mark" "$name" "$(opacity_of "$name")"
+    done
+}
+
+list() {
+    local current
+    current="$(active)"
+    section "Gradients (-a animates them)" "$(printf '%s\n' "$PRESETS" | awk '{ print $1 }')" "$current"
+    echo
+    section "Images" "$(names "$DIR"/*.jpg)" "$current"
+    echo
+    section "Scenes (always animated)" "$(names "$SCENES"/*.glsl)" "$current"
+}
+
+# Opacity $1 in one standard form (.4 and 0.40 are 0.4), since it is part of
+# a shader's file name; dies if it isn't between 0 and 1.
+normal_opacity() {
+    printf '%s' "$1" | grep -Eq '^(0?\.[0-9]+|[01](\.0+)?)$' || die "opacity must be between 0 and 1, not '$1'"
+    printf '%g' "$1"
+}
+
+# The current theme's background color as #rrggbb, or nothing if Ghostty
+# can't be asked.
+theme_bg() {
+    local g
+    g="$(ghostty_bin)"
+    [ -n "$g" ] || return 0
+    "$g" +show-config 2>/dev/null | awk '$1 == "background" && $2 == "=" { print $3; exit }'
+}
+
+# The current theme's background and palette colors 1 to 15, as
+# "background #rrggbb" and "N #rrggbb" lines. They come from the theme file
+# itself, since Ghostty's own config would include what fit_text writes.
+# Themes are looked for where Ghostty keeps them: the user's own, then
+# Ghostty's resources (named by $GHOSTTY_RESOURCES_DIR inside Ghostty; next
+# to the binary otherwise: Contents/Resources in the macOS app,
+# ../share/ghostty on Linux).
+theme_colors() {
+    local g name dir bin
+    g="$(ghostty_bin)"
+    [ -n "$g" ] || return 0
+    name="$("$g" +show-config 2>/dev/null | sed -n 's/^theme = //p' | head -n 1)"
+    bin="$(dirname "$(realpath "$g")")"
+    for dir in "${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/themes" "${GHOSTTY_RESOURCES_DIR:-/nonexistent}/themes" \
+        "$bin/../Resources/ghostty/themes" "$bin/../share/ghostty/themes"; do
+        [ -n "$name" ] && [ -f "$dir/$name" ] || continue
+        # "palette = 4=#525fb8" splits at both = signs: palette, 4, #525fb8.
+        awk -F ' *= *' '$1 == "background" { print "background", $2 }
+            $1 == "palette" && $2 >= 1 && $2 <= 15 { print $2, $3 }' "$dir/$name"
+        return 0
+    done
+}
+
+# Lighten the theme's dim palette colors, in the local config, as far as a
+# gradient needs: one blending the COLORS given over the theme's background
+# at OPACITY. Against its brightest point, each color should keep the
+# contrast it has on the plain theme (at most TEXT_CONTRAST), less the
+# TEXT_TOLERANCE allowance. A color is lightened by mixing it toward white
+# in linear light, which keeps its hue and has a closed form, since
+# luminance is linear there. Palette 0, the usual background black, is left
+# alone, as is any color already bright enough.
+fit_text() {
+    local opacity=$1
+    shift
+    unset_conf palette
+    theme_colors | awk -v o="$opacity" -v stops="$*" -v cap="$TEXT_CONTRAST" -v tol="$TEXT_TOLERANCE" '
+        function hx(s, i) { return index("0123456789abcdef", tolower(substr(s, i, 1))) - 1 }
+        function ch(c, i) { return hx(c, i) * 16 + hx(c, i + 1) }
+        function lin(v) { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
+        function enc(v) { v = v <= 0.0031308 ? v * 12.92 : 1.055 * v ^ (1 / 2.4) - 0.055; return int(v * 255 + 0.5) }
+        function lum(r, g, b) { return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) }
+        $1 == "background" { bg = $2; next }
+        { n++; key[n] = $1; col[n] = $2 }
+        END {
+            if (bg == "") exit
+            lt = lum(ch(bg, 2), ch(bg, 4), ch(bg, 6)); lb = lt
+            m = split(stops, s, " ")
+            for (i = 1; i <= m; i++) {
+                for (k = 2; k <= 6; k += 2) v[k] = ch(bg, k) + o * (ch(s[i], k) - ch(bg, k))
+                l = lum(v[2], v[4], v[6]); if (l > lb) lb = l
+            }
+            for (i = 1; i <= n; i++) {
+                c = col[i]; L = lum(ch(c, 2), ch(c, 4), ch(c, 6))
+                if (L <= lt) continue
+                want = (L + 0.05) / (lt + 0.05); if (want > cap) want = cap
+                need = want * (lb + 0.05) / tol - 0.05
+                if (L >= need) continue
+                t = need >= 1 ? 1 : (need - L) / (1 - L)
+                out = "#"
+                for (k = 2; k <= 6; k += 2) { x = lin(ch(c, k)); out = out sprintf("%02x", enc(x + t * (1 - x))) }
+                printf "palette = %s=%s\n", key[i], out
+            }
+        }' >>"$CONF"
+}
+
+# A bar WIDTH cells wide and HEIGHT rows tall, in truecolor, running through
+# the colors given after BG and OPACITY. With a BG they are blended over it
+# at OPACITY, the way the shader blends them over the theme's background.
+bar() {
+    local width=$1 height=$2 bg="" opacity=$4
+    [ -z "$3" ] || bg="$(rgb_of "$3")"
+    shift 4
+    ramp "$width" "$@" | awk -v h="$height" -v bg="$bg" -v o="$opacity" '
+        BEGIN { split(bg, b, " ") }
+        {
+            for (k = 1; k <= 3; k++) c[k] = (bg != "") ? b[k] + ($k - b[k]) * o : $k
+            row = row sprintf("\033[48;2;%d;%d;%dm ", c[1] + 0.5, c[2] + 0.5, c[3] + 0.5)
+        }
+        END { for (y = 0; y < h; y++) print row "\033[0m" }'
+}
+
+# The -fx expression for how far along a gradient at ANGLE a pixel is, 0 at
+# the start and 1 at the end, matching the shader's t.
+position_fx() {
+    awk -v a="$1" 'BEGIN {
+        r = a * atan2(0, -1) / 180; dx = sin(r); dy = -cos(r)
+        n = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy)
+        printf "((i + 0.5) / w - 0.5) * %.6f + ((j + 0.5) / h - 0.5) * %.6f + 0.5", dx / n, dy / n
+    }'
+}
+
+# Render gradient NAME's colors, at full strength and its own angle, to
+# PNGS/NAME.png, for apps that take a background image and set its opacity
+# themselves, like atrium and iTerm2. The position along the gradient is
+# worked out small and scaled up, which is exact for a straight ramp, then
+# turned into color through a lookup strip of the ramp.
+export_png() {
+    local name=$1 angle lut out
+    [ -n "$(preset "$name")" ] || die "only gradients can be saved as a PNG, and '$name' isn't one"
+    angle="$(preset "$name" | awk '{ print $2 }')"
+    mkdir -p "$PNGS"
+    out="$PNGS/$name.png"
+    # A template with X's works with both macOS's and GNU's mktemp.
+    lut="$(mktemp "${TMPDIR:-/tmp}/ghostty-bg.XXXXXX")"
+    {
+        printf 'P3\n1024 1\n255\n'
+        # shellcheck disable=SC2046
+        ramp 1024 $(colors_of "$name") | awk '{ printf "%d %d %d\n", $1 + 0.5, $2 + 0.5, $3 + 0.5 }'
+    } >"$lut"
+    im -size 960x540 xc: -colorspace sRGB -depth 16 -fx "$(position_fx "$angle")" \
+        -filter triangle -resize '3840x2160!' "ppm:$lut" -clut -depth 8 "$out"
+    rm -f "$lut"
+    echo "Saved $out"
+}
+
+# One picker line: NAME, a tab, then what fzf shows: a star if it is
+# CURRENT, the name, its opacity, a SWATCH and its KIND.
+pick_row() {
+    local mark=' '
+    [ "$1" != "$2" ] || mark='*'
+    printf '%s\t%s %-10s %-5s %s %s\n' "$1" "$mark" "$1" "$(opacity_of "$1")" "$3" "$4"
+}
+
+# Every background as a picker line: gradients, then images, then scenes.
+pick_rows() {
+    local current=$1 name blank
+    blank="$(printf '%16s' '')"
+    printf '%s\n' "$PRESETS" | awk '{ print $1 }' | sort | while IFS= read -r name; do
+        # shellcheck disable=SC2046
+        pick_row "$name" "$current" "$(bar 16 1 "" 1 $(colors_of "$name"))" gradient
+    done
+    names "$DIR"/*.jpg | sort | while IFS= read -r name; do pick_row "$name" "$current" "$blank" image; done
+    names "$SCENES"/*.glsl | sort | while IFS= read -r name; do pick_row "$name" "$current" "$blank" scene; done
+}
+
+# What the picker shows beside the list for background NAME. The picker
+# passes the theme's background in GHOSTTY_BG_THEME.
+preview() {
+    local name=$1 width=${FZF_PREVIEW_COLUMNS:-40} bg=${GHOSTTY_BG_THEME:-}
+    if [ -e "$DIR/$name.jpg" ]; then
+        echo "$name: an image, at opacity $(opacity_of "$name")"
+        echo
+        echo "$(shown "$DIR")/$name.jpg"
+    elif is_scene "$name"; then
+        echo "$name: an animated scene, at opacity $(opacity_of "$name")"
+        echo
+        # Its opening comment, up to the note about how it is copied in.
+        awk '!/^\/\// || /^\/\/ *ghostty-bg puts/ { exit }
+             { sub(/^\/\/ ?/, "") }
+             match($0, / ghostty-bg puts/) { print substr($0, 1, RSTART - 1); exit }
+             { print }' "$SCENES/$name.glsl"
+    else
+        echo "$name: a gradient, at opacity $(opacity_of "$name")"
+        echo
+        if [ -n "$bg" ]; then
+            echo "Over the theme's background:"
+            # shellcheck disable=SC2046
+            bar "$width" 8 "$bg" "$(opacity_of "$name")" $(colors_of "$name")
+            echo
+        fi
+        echo "Its colors:"
+        # shellcheck disable=SC2046
+        bar "$width" 2 "" 1 $(colors_of "$name")
+        echo
+        colors_of "$name" | paste -sd ' ' -
+    fi
+}
+
+# The background lines of the local config, to tell whether ctrl-t in the
+# picker changed what is in use.
+background_lines() { grep -E '^(custom-shader|custom-shader-animation|background-image) = ' "$CONF" || true; }
+
+# Put back what was in use when the picker opened (ORIGINAL, with its
+# config lines in ORIGINAL_LINES), if ctrl-t tried something else since.
+restore_original() {
+    [ -n "${ORIGINAL:-}" ] && [ "$(background_lines)" != "$ORIGINAL_LINES" ] || return 0
+    (
+        OPACITY=
+        ANIMATED=0
+        printf '%s\n' "$ORIGINAL_LINES" | grep -q '^custom-shader = .*-animated\.glsl$' && ANIMATED=1
+        activate "$ORIGINAL"
+    ) >/dev/null
+}
+
+cancelled() {
+    restore_original
+    printf '\nNothing changed.\n'
+    exit 0
+}
+
+# Choose a background in fzf, then ask for its opacity and, for a gradient,
+# whether it moves, and switch to it; or save a gradient as an image with
+# ctrl-s. ctrl-t tries the highlighted one without leaving the picker. Esc
+# in fzf, or ctrl-c or ctrl-d at a question, changes nothing: whatever was
+# in use when it opened is put back.
+pick() {
+    local current rows pos choice name value answer hint max
+    command -v fzf >/dev/null 2>&1 || die "picking needs fzf: brew install fzf"
+    current="$(active)"
+    ORIGINAL=$current
+    ORIGINAL_LINES="$(background_lines)"
+    GHOSTTY_BG_THEME="$(theme_bg)"
+    export GHOSTTY_BG_THEME
+    rows="$(pick_rows "$current")"
+    pos="$(printf '%s\n' "$rows" | awk -F '\t' -v c="$current" '$1 == c { print NR; exit }')"
+    # With --expect, fzf prints the key that ended it (empty for enter),
+    # then the choice.
+    choice="$(printf '%s\n' "$rows" | fzf --ansi --delimiter '\t' --with-nth 2 --accept-nth 1 \
+        --layout reverse --height 80% --border --border-label ' ghostty-bg ' \
+        --prompt 'background> ' \
+        --header $'enter switch · ctrl-s PNG · esc cancel\n↑↓ move · ctrl-t try · type to search' \
+        --footer $'then opacity: enter keeps · d default\ngradients: animate y/N · ctrl-c cancel' \
+        --footer-border line \
+        --expect ctrl-s --bind "load:pos(${pos:-1})" \
+        --bind "ctrl-t:execute-silent('$REPO/bin/ghostty-bg' {1})" \
+        --preview "'$REPO/bin/ghostty-bg' --preview {1}" --preview-window 'right,55%,<50(down,40%)')" || cancelled
+    name="$(printf '%s\n' "$choice" | sed -n 2p)"
+    if [ "$(printf '%s\n' "$choice" | sed -n 1p)" = ctrl-s ]; then
+        restore_original
+        export_png "$name"
+        return
+    fi
+    trap cancelled INT
+    hint="$(opacity_of "$name"); d for its default $(default_opacity "$name")"
+    if [ -n "$(preset "$name")" ]; then
+        max="$(readable_max "$name")"
+        [ -z "$max" ] || hint="$hint; readable up to $max"
+    fi
+    read -r -p "Opacity for $name, 0 to 1 [$hint]: " value || cancelled
+    if [ "$value" = d ]; then
+        forget_opacity "$name"
+        value="$(default_opacity "$name")"
+    fi
+    value="$(normal_opacity "${value:-$(opacity_of "$name")}")"
+    # Only a changed opacity is remembered, so a gradient keeps following
+    # its own starting opacity until it is given another.
+    [ "$value" = "$(opacity_of "$name")" ] || OPACITY=$value
+    if [ -n "$(preset "$name")" ]; then
+        read -r -p "Animate $name? Ghostty redraws continuously while it moves. [y/N]: " answer || cancelled
+        case "$answer" in [yY]*) ANIMATED=1 ;; esac
+    fi
+    trap - INT
+    activate "$name"
+}
+
+# The picker's preview pane calls back in as `ghostty-bg --preview NAME`.
+if [ "${1:-}" = "--preview" ]; then
+    preview "${2:-}"
+    exit 0
+fi
+
+# getopts has no long options, so turn the ones there are into short ones.
+for arg in "$@"; do
+    shift
+    case "$arg" in
+        --help) set -- "$@" -h ;;
+        --animated) set -- "$@" -a ;;
+        --pick) set -- "$@" -p ;;
+        --reset) set -- "$@" -r ;;
+        --reset-all) set -- "$@" -R ;;
+        --png) set -- "$@" -i ;;
+        *) set -- "$@" "$arg" ;;
+    esac
+done
+while getopts "o:apirRh" opt; do
+    case "$opt" in
+        o) OPACITY=$OPTARG ;;
+        a) ANIMATED=1 ;;
+        p) PICK=1 ;;
+        i) PNG=1 ;;
+        r) RESET=1 ;;
+        R) RESET=all ;;
+        h) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+shift $((OPTIND - 1))
+[ "$#" -le 2 ] || { usage >&2; exit 2; }
+[ -z "$OPACITY" ] || OPACITY="$(normal_opacity "$OPACITY")"
+mkdir -p "$STATE" "$DIR"
+[ -e "$CONF" ] || echo "# Written by ghostty-bg: this machine's Ghostty background." >"$CONF"
+if [ "$RESET" != 0 ]; then
+    [ -z "$OPACITY" ] || die "-r and -R go back to the starting opacity, so they can't take -o too"
+    if [ "$RESET" = all ]; then
+        [ "$#" -eq 0 ] || die "-R resets every background; it takes no name"
+        rm -f "$OPACITIES"
+        [ -n "$(active)" ] || { echo "Every background is back to its starting opacity."; exit 0; }
+    else
+        forget_opacity "${1:-$(active)}"
+    fi
+fi
+
+if [ "$PNG" -eq 1 ]; then
+    [ "$#" -eq 1 ] || die "name the gradient to save: ghostty-bg --png GRADIENT"
+    export_png "$1"
+elif [ "$PICK" -eq 1 ]; then
+    pick
+elif [ "$#" -eq 0 ] && [ -z "$OPACITY" ] && [ "$ANIMATED" -eq 0 ] && [ "$RESET" = 0 ]; then
+    list
+elif [ "$#" -eq 0 ]; then
+    [ -n "$(active)" ] || die "no active background to change; name one: ghostty-bg NAME"
+    # Only the opacity is changing (or -r resetting it), so a gradient that
+    # is animated stays so.
+    ! grep -q '^custom-shader = .*-animated\.glsl$' "$CONF" || ANIMATED=1
+    activate "$(active)"
+elif [ -f "$1" ]; then
+    import "$@"
+elif [ "$#" -eq 2 ]; then
+    die "no such file: $1"
+elif [ -e "$DIR/$1.jpg" ] || is_scene "$1" || [ -n "$(preset "$1")" ]; then
+    activate "$1"
+else
+    die "no image, gradient or scene named '$1' (and no such file); run ghostty-bg to list them"
+fi

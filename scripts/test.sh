@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# Checks ghostty-bg: lints it (bash -n, then shellcheck if installed), then
+# runs it with its state in a throwaway folder and checks what it writes:
+# its config, the shader, the remembered opacities and exported images.
+# Ghostty is left alone: its config doesn't include the throwaway one, so
+# ghostty-bg doesn't signal it. The picker (-p) is interactive and not
+# covered, beyond its preview pane. Needs ImageMagick; compiles the shaders
+# too if glslangValidator is installed, and checks the text-color lifting
+# if Ghostty is. Exits non-zero if any check fails.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+bash -n bin/ghostty-bg scripts/test.sh
+if command -v shellcheck >/dev/null 2>&1; then
+    shellcheck -S warning bin/ghostty-bg scripts/test.sh
+else
+    echo "skip  shellcheck (not installed)"
+fi
+
+# A template with X's works with both macOS's and GNU's mktemp.
+work="$(mktemp -d "${TMPDIR:-/tmp}/test-ghostty-bg.XXXXXX")"
+trap 'rm -rf "$work"' EXIT
+export HOME="$work/home"   # --png saves under ~/Pictures
+export XDG_CONFIG_HOME="$work/config"
+state="$XDG_CONFIG_HOME/ghostty-bg"
+conf="$state/ghostty-bg.conf"
+shaders="$state/shaders"
+opacities="$state/opacity"
+# Ghostty's theme, for the text-color checks: on Linux this is Ghostty's
+# whole config; macOS also reads the user's own, which names a theme anyway.
+mkdir -p "$HOME" "$XDG_CONFIG_HOME/ghostty" "$state/backgrounds"
+echo 'theme = Fish Tank' >"$XDG_CONFIG_HOME/ghostty/config"
+
+im() { if command -v magick >/dev/null 2>&1; then magick "$@"; else convert "$@"; fi; }
+im -size 64x40 gradient:navy-teal "$state/backgrounds/sample.jpg"
+
+bg() { bin/ghostty-bg "$@"; }
+has() { grep -q -- "$2" "$1"; }   # FILE PATTERN
+lacks() { ! grep -q -- "$2" "$1"; }
+fails() { ! "$@"; }
+says() { bg "$1" | grep -q -- "$2"; }   # NAME TEXT: switching to NAME prints TEXT
+previews() { bg --preview "$1" | grep -q -- "$2"; }   # NAME TEXT
+warns() { bg "$@" | grep -q 'readable up to'; }   # ARGS: switching warns it's too bright
+empty() { [ -z "$(ls -A "$1")" ]; }   # DIR
+pixel() { im "$1" -format "%[hex:p{$2}]" info:; }   # FILE X,Y
+# Palette 4 (blue) in the config is lighter than the theme's #525fb8 and
+# still has more blue in it than red or green.
+blue_still_blue() {
+    sed -n 's/^palette = 4=#//p' "$conf" | awk '{
+        r = index("0123456789abcdef", substr($1, 1, 1)) * 16; g = index("0123456789abcdef", substr($1, 3, 1)) * 16
+        b = index("0123456789abcdef", substr($1, 5, 1)) * 16
+        exit !(b > r && b > g && r + g + b > 82 + 95 + 184) }'
+}
+
+# The shader with a stand-in for the header Ghostty puts in front of it.
+compiles() {
+    {
+        printf '%s\n' '#version 430 core' \
+            'layout(binding = 1, std140) uniform Globals { vec3 iResolution; float iTime; vec3 iBackgroundColor; };' \
+            'layout(binding = 0) uniform sampler2D iChannel0;' 'layout(location = 0) out vec4 _fragColor;' \
+            'void mainImage(out vec4 fragColor, in vec2 fragCoord);' \
+            'void main() { mainImage(_fragColor, gl_FragCoord.xy); }'
+        cat "$shaders"/*.glsl
+    } >"$work/check.frag"
+    glslangValidator -G "$work/check.frag" -o /dev/null
+}
+
+failed=0
+# check DESCRIPTION COMMAND...: run COMMAND quietly and report whether it held.
+check() {
+    local what=$1
+    shift
+    if "$@" >/dev/null 2>&1; then
+        echo "ok    $what"
+    else
+        echo "FAIL  $what"
+        failed=$((failed + 1))
+    fi
+}
+glsl() {
+    if command -v glslangValidator >/dev/null 2>&1; then check "$1" compiles; else echo "skip  $1 (no glslangValidator)"; fi
+}
+
+check "a config Ghostty doesn't include says how to add it" says ember "doesn't include"
+
+bg orchid >/dev/null
+check "a gradient starts at its preset's opacity" test -e "$shaders/orchid-0.7.glsl"
+check "a still gradient isn't animated" has "$conf" '^custom-shader-animation = false$'
+
+bg -a turbo >/dev/null
+check "a five-color preset gives a five-color shader" has "$shaders/turbo-0.3-animated.glsl" '^const int N = 5;$'
+glsl "an animated five-color shader compiles"
+
+bg -a sunset >/dev/null
+bg -o 0.4 >/dev/null
+check "changing only the opacity keeps the animation" test -e "$shaders/sunset-0.4-animated.glsl"
+check "-o is remembered" has "$opacities" '^sunset 0.4$'
+bg -o .4 ocean >/dev/null
+check "an opacity typed as .4 is 0.4, so it names the same shader" test -e "$shaders/ocean-0.4.glsl"
+bg -r ocean >/dev/null
+check "-r goes back to the starting opacity" test -e "$shaders/ocean-0.25.glsl"
+check "-r forgets the remembered opacity" lacks "$opacities" '^ocean '
+bg -o 0.5 orchid >/dev/null
+bg -o 0.6 sample >/dev/null
+bg -R >/dev/null
+check "-R forgets every remembered opacity" fails test -s "$opacities"
+check "-R puts the active background back at its own" has "$conf" '^background-image-opacity = 0.25$'
+
+bg sample >/dev/null
+check "an image clears the shader" empty "$shaders"
+check "an image drops the shader lines" lacks "$conf" '^custom-shader'
+check "an image is named in the config" has "$conf" '^background-image = .*/sample.jpg$'
+mkdir -p "$work/elsewhere"
+im -size 64x40 gradient:black-maroon "$work/elsewhere/other.jpg"
+GHOSTTY_BG_IMAGES="$work/elsewhere" bg other >/dev/null
+check "GHOSTTY_BG_IMAGES points at another image folder" has "$conf" "^background-image = .*/elsewhere/other.jpg$"
+
+bg jellyfish >/dev/null
+check "leaving an image drops its opacity line" lacks "$conf" '^background-image'
+check "a scene gets its strength put in front" has "$shaders/jellyfish-0.25.glsl" '^const float STRENGTH = 0.250;$'
+check "a scene is animated" has "$conf" '^custom-shader-animation = true$'
+glsl "a scene compiles"
+
+# Lifting dim text reads the theme through Ghostty itself.
+if command -v ghostty >/dev/null 2>&1 || [ -x /Applications/Ghostty.app/Contents/MacOS/ghostty ]; then
+    bg glacier >/dev/null
+    check "a pale gradient lifts the dim palette colors" has "$conf" '^palette = 4=#'
+    check "a lifted color keeps its hue (blue stays bluest)" blue_still_blue
+    bg jellyfish >/dev/null
+    check "a scene drops the lifted colors" lacks "$conf" '^palette'
+    bg orchid >/dev/null
+    check "a deep gradient leaves the palette alone" lacks "$conf" '^palette'
+    check "a gradient past its readable opacity warns" warns -o 1 ylorrd
+    check "a deep gradient at full opacity doesn't warn" fails warns -o 1 velvet
+else
+    echo "skip  text-color lifting and readability warnings (no Ghostty)"
+fi
+
+bg orchid >/dev/null
+cp "$conf" "$work/before.conf"
+bg --png orchid >/dev/null
+png="$HOME/Pictures/ghostty-bg/orchid.png"
+check "--png leaves the background alone" cmp -s "$conf" "$work/before.conf"
+check "--png renders 3840x2160" test "$(im "$png" -format '%wx%h' info:)" = 3840x2160
+check "--png starts at the first color" test "$(pixel "$png" 0,0)" = 6A1B6E
+check "--png ends at the last color" test "$(pixel "$png" 3839,2159)" = 0D4A8A
+check "--png refuses an image" fails bg --png sample
+
+check "an unknown name fails" fails bg nope
+check "an opacity over 1 fails" fails bg -o 2 orchid
+check "the picker previews a gradient's colors" previews orchid '#6a1b6e #3b1f8a #0d4a8a'
+check "the picker previews a scene's description" previews jellyfish 'Sea nettles'
+check "a scene's preview leaves out the copying note" fails previews jellyfish 'ghostty-bg puts'
+
+if [ "$failed" -gt 0 ]; then
+    echo "$failed failed"
+    exit 1
+fi
+echo "all passed"
