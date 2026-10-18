@@ -6,6 +6,10 @@ const vec2 CELL = vec2(21.0, 27.0);  // pixels per character
 const float SPEED = 1.0;             // cells per second, roughly
 const vec3 TRAIL = vec3(0.20, 0.75, 0.40);
 const vec3 HEAD = vec3(0.70, 1.00, 0.80);
+// Behind the code, the theme's background is darkened toward this gray, by
+// DARKEN (0 leaves it as it is, 1 replaces it).
+const vec3 BACKDROP = vec3(0.055);
+const float DARKEN = 0.8;
 
 // Katakana in a 5x7 grid, one bit per dot, each row read left to right: x
 // holds rows 0-3 and y rows 4-6, top row in the high bits. They are stored
@@ -93,5 +97,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // 1 on the background, fading to 0 as the pixel moves away from it.
     float mask = 1.0 - smoothstep(0.02, 0.2, distance(term.rgb, iBackgroundColor));
 
-    fragColor = vec4(term.rgb + code * STRENGTH * mask, term.a);
+    vec3 base = mix(term.rgb, BACKDROP, DARKEN * mask);
+    fragColor = vec4(base + code * STRENGTH * mask, term.a);
 }
