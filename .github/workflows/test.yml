@@ -1,0 +1,36 @@
+# Runs scripts/test.sh on Linux and on macOS. On macOS it puts the system's
+# own bash 3.2 first, the oldest bash ghostty-bg supports. Neither runner
+# has Ghostty, so the checks that read its theme are skipped there.
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fzf imagemagick shellcheck glslang-tools
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install fzf imagemagick shellcheck glslang
+
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        run: scripts/test.sh
+
+      - name: Test (macOS, bash 3.2)
+        if: runner.os == 'macOS'
+        run: PATH="/bin:/usr/bin:$PATH" scripts/test.sh
