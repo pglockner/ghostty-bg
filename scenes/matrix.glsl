@@ -50,7 +50,8 @@ const ivec2 GLYPH[GLYPHS] = ivec2[GLYPHS](
     ivec2(1033761, 2184)    // wa
 );
 
-// Dave Hoskins' hash without sine. A sine hash goes stale as its input
+// Dave Hoskins' hash without sine (https://www.shadertoy.com/view/4djSRW,
+// Copyright (c) 2014 David Hoskins, MIT License). A sine hash goes stale as its input
 // grows with time (32-bit floats can't hold sin() of a large number
 // precisely), and the characters' ticks grow for as long as the scene runs.
 float hash(vec2 p) {

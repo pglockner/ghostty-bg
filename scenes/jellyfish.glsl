@@ -12,7 +12,8 @@ const float CUT = -0.1;                       // where the bell's sphere is cut 
 float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
 
 // For anything whose input grows with time: Dave Hoskins' hashes without
-// sine. A sine hash fed a growing number stops being random once 32-bit
+// sine (https://www.shadertoy.com/view/4djSRW, Copyright (c) 2014 David
+// Hoskins, MIT License). A sine hash fed a growing number stops being random once 32-bit
 // floats can't hold sin() of it precisely; after a few hours the specks
 // fell into a grid.
 float hash2(vec2 p) {
