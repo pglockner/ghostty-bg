@@ -1,5 +1,7 @@
 # ghostty-bg
 
+[![test](https://github.com/pglockner/ghostty-bg/actions/workflows/test.yml/badge.svg)](https://github.com/pglockner/ghostty-bg/actions/workflows/test.yml)
+
 Gradients, animated scenes and images as backgrounds for
 [Ghostty](https://ghostty.org), switched from the command line or an fzf
 picker with live color previews, while keeping your text readable.
@@ -22,6 +24,8 @@ picker with live color previews, while keeping your text readable.
 - **macOS and Linux**
 
 ![The picker, previewing velvet](docs/picker.png)
+
+![The matrix scene behind ghostty-bg's help](docs/matrix.png)
 
 ## Install
 
