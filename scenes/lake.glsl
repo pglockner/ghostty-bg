@@ -100,8 +100,14 @@ float wake(vec2 p, Boat B, float n) {
 
     float wobble = 1.8 * noise(vec3(b * 40.0, y * 40.0, iTime * 0.5 + n * 3.0));
     float patchy = 0.5 + noise(vec3(b * 22.0, y * 22.0, iTime * 0.3 + n * 7.0));
-    float across = cos(WAVE * 0.6 * b * (1.0 + 0.5 * s * s) + wobble) * (1.0 - smoothstep(0.5, 1.0, s)) * 0.12;
-    float arms = cos(WAVE * 1.3 * (0.5 * b + y) + wobble) * exp(-pow((s - 1.0) / 0.15, 2.0)) * 0.45;
+    float across = cos(WAVE * 0.6 * b * (1.0 + 0.5 * s * s) + wobble - iTime) * (1.0 - smoothstep(0.5, 1.0, s)) * 0.12;
+    // Each arm: a thin ridge with a fainter one inside it, both broken
+    // into stretches, and faint crests running outward and back across them.
+    float bend = 0.05 * (noise(vec3(b * 30.0, n, iTime * 0.2)) - 0.5);
+    float gaps = smoothstep(0.3, 0.7, noise(vec3(b * 14.0, by.y > 0.0 ? 1.0 : 2.0, iTime * 0.15 + n)));
+    float ridges = exp(-pow((s - 1.0 + bend) / 0.05, 2.0)) + 0.5 * exp(-pow((s - 0.8 + bend) / 0.04, 2.0));
+    float crests = cos(WAVE * 1.3 * (0.5 * b + y) - iTime * 2.5 + wobble) * exp(-pow((s - 1.0) / 0.15, 2.0));
+    float arms = 0.35 * ridges * gaps + 0.08 * crests;
     float height = 0.035 * B.L * (across + arms) * patchy * pow(1.0 - b / WAKE, 1.5);
 
     float st = b - 1.9 * B.L;
