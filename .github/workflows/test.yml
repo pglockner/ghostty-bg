@@ -1,6 +1,7 @@
 # Runs scripts/test.sh on Linux and on macOS. On macOS it puts the system's
 # own bash 3.2 first, the oldest bash ghostty-bg supports. Neither runner
-# has Ghostty, so the checks that read its theme are skipped there.
+# has Ghostty, so the faint-opacity checks are skipped there; the theme
+# checks use the copies in scripts/themes/.
 name: test
 
 # Pushes to main and pull requests; a pull request's own pushes run once,
