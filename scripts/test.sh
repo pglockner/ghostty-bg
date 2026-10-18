@@ -5,7 +5,7 @@
 # Ghostty is left alone: its config doesn't include the throwaway one, so
 # ghostty-bg doesn't signal it. The picker (-p) is interactive and not
 # covered, beyond its preview pane. Needs ImageMagick; compiles the shaders
-# too if glslangValidator is installed, and checks the text-color lifting
+# too if glslangValidator is installed, and checks the text-color fitting
 # if Ghostty is. Exits non-zero if any check fails.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,10 +26,10 @@ state="$XDG_CONFIG_HOME/ghostty-bg"
 conf="$state/ghostty-bg.conf"
 shaders="$state/shaders"
 opacities="$state/opacity"
-# Ghostty's theme, for the text-color checks: on Linux this is Ghostty's
-# whole config; macOS also reads the user's own, which names a theme anyway.
-mkdir -p "$HOME" "$XDG_CONFIG_HOME/ghostty" "$state/backgrounds"
-echo 'theme = Fish Tank' >"$XDG_CONFIG_HOME/ghostty/config"
+# The theme the text-color checks read: a dark one, and with light, a light
+# one.
+export GHOSTTY_BG_THEME_NAME='Fish Tank'
+mkdir -p "$HOME" "$state/backgrounds"
 
 im() { if command -v magick >/dev/null 2>&1; then magick "$@"; else convert "$@"; fi; }
 im -size 64x40 gradient:navy-teal "$state/backgrounds/sample.jpg"
@@ -40,7 +40,8 @@ lacks() { ! grep -q -- "$2" "$1"; }
 fails() { ! "$@"; }
 says() { bg "$1" | grep -q -- "$2"; }   # NAME TEXT: switching to NAME prints TEXT
 previews() { bg --preview "$1" | grep -q -- "$2"; }   # NAME TEXT
-warns() { bg "$@" | grep -q 'readable up to'; }   # ARGS: switching warns it's too bright
+warns() { bg "$@" | grep -q 'readable up to'; }   # ARGS: switching warns it's too strong
+light() { GHOSTTY_BG_THEME_NAME='Atom One Light' "$@"; }   # COMMAND...: run it over a light theme
 empty() { [ -z "$(ls -A "$1")" ]; }   # DIR
 pixel() { im "$1" -format "%[hex:p{$2}]" info:; }   # FILE X,Y
 # Palette 4 (blue) in the config is lighter than the theme's #525fb8 and
@@ -50,6 +51,13 @@ blue_still_blue() {
         r = index("0123456789abcdef", substr($1, 1, 1)) * 16; g = index("0123456789abcdef", substr($1, 3, 1)) * 16
         b = index("0123456789abcdef", substr($1, 5, 1)) * 16
         exit !(b > r && b > g && r + g + b > 82 + 95 + 184) }'
+}
+# Palette 3 (yellow) in the config is darker than the light theme's #d2b67c.
+yellow_darkened() {
+    sed -n 's/^palette = 3=#//p' "$conf" | awk '{
+        r = index("0123456789abcdef", substr($1, 1, 1)) * 16; g = index("0123456789abcdef", substr($1, 3, 1)) * 16
+        b = index("0123456789abcdef", substr($1, 5, 1)) * 16
+        exit !(r + g + b < 210 + 182 + 124) }'
 }
 
 # Every preset in bin/ghostty-bg is angled 135 (top left to bottom right)
@@ -146,6 +154,15 @@ if command -v ghostty >/dev/null 2>&1 || [ -x /Applications/Ghostty.app/Contents
     check "a deep gradient leaves the palette alone" lacks "$conf" '^palette'
     check "a gradient past its readable opacity warns" warns -o 1 wildfire
     check "a deep gradient at full opacity doesn't warn" fails warns -o 1 velvet
+    light bg orchid >/dev/null
+    check "a deep gradient on a light theme darkens its pale colors" yellow_darkened
+    check "a deep gradient on a light theme warns past its readable opacity" light warns -o 1 velvet
+    check "a light theme's foreground needs full contrast (orchid warns at 0.7)" light warns -o 0.7 orchid
+    light bg -r orchid >/dev/null
+    check "a deep gradient on a light theme starts at its readable opacity" has "$conf" '/orchid-0\.5\.glsl$'
+    check "a deep gradient on a light theme raises faint-opacity" has "$conf" '^faint-opacity = 0\.[6-9]'
+    bg jellyfish >/dev/null
+    check "a scene drops the raised faint-opacity" lacks "$conf" '^faint-opacity'
 else
     echo "skip  text-color lifting and readability warnings (no Ghostty)"
 fi

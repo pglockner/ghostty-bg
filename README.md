@@ -16,12 +16,21 @@ picker with live color previews, while keeping your text readable.
 - **A picker** (`ghostty-bg -p`) with color swatches and a preview of each
   gradient over your theme; ctrl-t tries one without leaving it
 - **Readable text:** each gradient's bright end sits in the bottom-right
-  corner, where text rarely goes; over bright gradients the theme's dim text
-  colors are lightened just enough, keeping their hue; and a gradient pushed
-  past the opacity where text stays readable says so
+  corner, where text rarely goes; when a gradient washes out the theme's dim
+  text colors, they are strengthened just enough, keeping their hue; and a
+  gradient pushed past the opacity where text stays readable says so
 - **Automatic reload** with Ghostty 1.3 or later
 - **PNG export** of any gradient, for apps that take a background image
 - **macOS and Linux**
+
+The gradients, their starting opacities and the scenes are made for dark
+themes. On a light theme the readability help works in reverse, darkening
+pale text colors and warning when a gradient gets too dark, but the
+gradients themselves were chosen to look good over a dark background. Dark
+text on a darkened background is harder to read than contrast figures
+suggest, so on a light theme the checks are stricter, and the deepest
+gradients (orchid, velvet, coals and the like) start at a lower opacity
+than on a dark one. Paler ones, like forest, glacier and orchard, look good.
 
 ![The picker, previewing velvet](docs/picker.png)
 
@@ -78,7 +87,11 @@ shader or image, and signals Ghostty to reload.
 Over a bright gradient that isn't enough to keep dim text readable, so
 ghostty-bg also writes lighter versions of the theme's dim palette colors
 into that file, worked out from the gradient's colors and opacity. Deep
-gradients leave the palette as it is.
+gradients leave the palette as it is. On a light theme it is the other way
+round: every gradient darkens the background, so text colors get darker to
+match, the most for deep gradients. Faint text, which Ghostty draws
+half-transparent, is made more opaque the same way when a gradient needs
+it.
 
 ![wildfire, with the theme's dim colors lifted](docs/wildfire.png)
 
