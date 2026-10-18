@@ -76,7 +76,10 @@ and leaves text alone. The shader is written to ~/.config/ghostty-bg/shaders/,
 which holds only the gradient or scene in use. When a gradient makes the
 background bright enough to wash out the theme's dim text colors, those
 palette colors are lightened in ghostty-bg.conf, just enough to stay
-readable and keeping their hue; deep gradients leave them as they are.
+readable and keeping their hue; deep gradients leave them as they are. On
+a light theme it is the other way round: gradients darken them, deep ones
+the most. Faint text is made more opaque where it needs to be. The
+gradients and scenes are made for dark themes, though.
 
 A scene is a shader kept as scenes/NAME.glsl in ghostty-bg's own folder,
 NAME in lowercase letters. It is copied in with `const float STRENGTH` (the
@@ -106,6 +109,35 @@ DEFAULT_OPACITY=0.25
 # anything changes (orchid and velvet, at 0.7, stay within it).
 TEXT_CONTRAST=4.5
 TEXT_TOLERANCE=1.5
+# The awk functions the readability math shares. Colors are "#rrggbb", and
+# luminance and contrast are WCAG's. The ink is the extreme a theme's text
+# leans to: white (1) on a dark background, black (0) on a light one,
+# whichever has more contrast with it. Set INK before using nearer,
+# nearest or allowance.
+COLOR_AWK='
+    function hx(s, i) { return index("0123456789abcdef", tolower(substr(s, i, 1))) - 1 }
+    function ch(c, i) { return hx(c, i) * 16 + hx(c, i + 1) }
+    function lin(v) { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
+    function enc(v) { v = v <= 0.0031308 ? v * 12.92 : 1.055 * v ^ (1 / 2.4) - 0.055; return int(v * 255 + 0.5) }
+    function lum(r, g, b) { return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) }
+    function contrast(a, b) { return a > b ? (a + 0.05) / (b + 0.05) : (b + 0.05) / (a + 0.05) }
+    function ink(l) { return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? 1 : 0 }
+    function nearer(a, b) { return INK ? a > b : a < b }
+    # The contrast a background may cost, as a divisor: TOL on a dark
+    # theme, none on a light one. WCAG overrates dark text on the mid-tones
+    # a deep gradient makes of a light background, so there the full
+    # contrast is needed.
+    function allowance(tol) { return INK ? tol : 1 }
+    # The luminance nearest the ink among FROM and the background BG blended
+    # toward each of the M colors S at opacity O, as the shader blends them.
+    function nearest(bg, s, m, o, from,    i, k, v, l) {
+        for (i = 1; i <= m; i++) {
+            for (k = 2; k <= 6; k += 2) v[k] = ch(bg, k) + o * (ch(s[i], k) - ch(bg, k))
+            l = lum(v[2], v[4], v[6]); if (nearer(l, from)) from = l
+        }
+        return from
+    }
+'
 OPACITY=
 ANIMATED=0
 PICK=0
@@ -224,8 +256,8 @@ active() {
 opacity_of() {
     local found
     found="$(awk -v n="$1" '$1 == n { print $2 }' "$OPACITIES" 2>/dev/null || true)"
-    [ -n "$found" ] || found="$(start_opacity "$1")"
-    printf '%s' "${found:-$DEFAULT_OPACITY}"
+    [ -n "$found" ] || found="$(default_opacity "$1")"
+    printf '%s' "$found"
 }
 
 remember_opacity() {
@@ -241,50 +273,48 @@ forget_opacity() {
     printf '%s\n' "$rest" | sed '/^$/d' >"$OPACITIES"
 }
 
-# The opacity NAME starts at when it has none remembered.
+# The opacity NAME starts at when it has none remembered: its own starting
+# opacity, but for a gradient no more than its readable maximum over the
+# current theme. The starting opacities were chosen on dark themes; this
+# brings the deep gradients down on a light one.
 default_opacity() {
-    local start
+    local start max=
     start="$(start_opacity "$1")"
-    printf '%s' "${start:-$DEFAULT_OPACITY}"
+    [ -z "$(preset "$1")" ] || max="$(readable_max "$1")"
+    awk -v s="${start:-$DEFAULT_OPACITY}" -v m="$max" 'BEGIN { print (m != "" && m < s ? m : s) }'
 }
 
-# The highest opacity, in steps of 0.05, at which gradient NAME leaves white
-# text TEXT_CONTRAST / TEXT_TOLERANCE (3:1) against its brightest point:
-# past it, even fit_text's lightest colors wash out. 1 for gradients that
-# never get that bright; nothing if the theme can't be read.
+# The highest opacity, in steps of 0.05, at which gradient NAME leaves text
+# TEXT_CONTRAST, less its allowance, against its point nearest the ink: past
+# it, even fit_text's strongest colors wash out. The text is white on a dark
+# theme (3:1 there) and the theme's own foreground on a light one (4.5:1),
+# which is what the warning was checked against by eye. 1 for gradients
+# that never get that near; nothing if the theme can't be read.
 readable_max() {
     theme_colors | awk -v stops="$(colors_of "$1" | tr '\n' ' ')" \
-        -v floor="$(awk -v c="$TEXT_CONTRAST" -v t="$TEXT_TOLERANCE" 'BEGIN { print c / t }')" '
-        function hx(s, i) { return index("0123456789abcdef", tolower(substr(s, i, 1))) - 1 }
-        function ch(c, i) { return hx(c, i) * 16 + hx(c, i + 1) }
-        function lin(v) { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
+        -v cap="$TEXT_CONTRAST" -v tol="$TEXT_TOLERANCE" "$COLOR_AWK"'
         $1 == "background" { bg = $2 }
+        $1 == "foreground" { fg = $2 }
         END {
             if (bg == "") exit
+            INK = ink(lum(ch(bg, 2), ch(bg, 4), ch(bg, 6)))
+            text = INK || fg == "" ? INK : lum(ch(fg, 2), ch(fg, 4), ch(fg, 6))
             m = split(stops, s, " ")
             for (step = 20; step >= 1; step--) {
-                o = step / 20; lb = 0
-                for (i = 1; i <= m; i++) {
-                    l = 0
-                    for (k = 2; k <= 6; k += 2) {
-                        w = (k == 2) ? 0.2126 : (k == 4) ? 0.7152 : 0.0722
-                        l += w * lin(ch(bg, k) + o * (ch(s[i], k) - ch(bg, k)))
-                    }
-                    if (l > lb) lb = l
-                }
-                if (1.05 / (lb + 0.05) >= floor) { print o; exit }
+                o = step / 20
+                if (contrast(text, nearest(bg, s, m, o, 1 - INK)) >= cap / allowance(tol)) { print o; exit }
             }
             print 0.05
         }'
 }
 
 # A warning when gradient NAME's opacity is past its readable maximum.
-too_bright() {
+too_strong() {
     local max
     max="$(readable_max "$1")"
     [ -n "$max" ] || return 0
     awk -v o="$(opacity_of "$1")" -v m="$max" 'BEGIN { exit !(o > m) }' || return 0
-    echo "Too bright for text to stay readable: $1 is readable up to $max (ghostty-bg -o $max $1, or -r $1 for its default $(default_opacity "$1"))."
+    echo "Too strong for text to stay readable: $1 is readable up to $max (ghostty-bg -o $max $1, or -r $1 for its default $(default_opacity "$1"))."
 }
 
 # "#2f6bff" as "47 107 255".
@@ -444,7 +474,7 @@ activate_image() {
     unset_conf custom-shader-animation
     set_conf background-image "$(shown "$DIR")/$name.jpg"
     set_conf background-image-opacity "$(opacity_of "$name")"
-    unset_conf palette
+    unfit_text
     said "$name" ""
 }
 
@@ -465,8 +495,10 @@ activate_gradient() {
     use_shader "$file" "$animation"
     # shellcheck disable=SC2046
     fit_text "$(opacity_of "$name")" $(colors_of "$name")
+    # shellcheck disable=SC2046
+    fit_faint "$(opacity_of "$name")" $(colors_of "$name")
     said "$name" "$note"
-    too_bright "$name"
+    too_strong "$name"
 }
 
 # Copy the scene NAME's shader in, with its strength put in front. A scene
@@ -481,7 +513,7 @@ activate_scene() {
         cat "$SCENES/$name.glsl"
     } >"$(new_shader "$file")"
     use_shader "$file" true
-    unset_conf palette
+    unfit_text
     said "$name" ", animated"
 }
 
@@ -574,69 +606,112 @@ theme_bg() {
     "$g" +show-config 2>/dev/null | awk '$1 == "background" && $2 == "=" { print $3; exit }'
 }
 
-# The current theme's background and palette colors 1 to 15, as
-# "background #rrggbb" and "N #rrggbb" lines. They come from the theme file
-# itself, since Ghostty's own config would include what fit_text writes.
+# The current theme's background, foreground and palette colors 1 to 15, as
+# "background #rrggbb", "foreground #rrggbb" and "N #rrggbb" lines, then
+# Ghostty's default faint-opacity as a "faint-opacity N" line, if this
+# Ghostty has one (from 1.2). The colors come from the theme file itself,
+# since Ghostty's own config would include what fit_text writes.
 # Themes are looked for where Ghostty keeps them: the user's own, then
 # Ghostty's resources (named by $GHOSTTY_RESOURCES_DIR inside Ghostty; next
 # to the binary otherwise: Contents/Resources in the macOS app,
-# ../share/ghostty on Linux).
-theme_colors() {
+# ../share/ghostty on Linux). $GHOSTTY_BG_THEME_NAME names a theme to read
+# instead of Ghostty's own, for tests: on macOS, Ghostty always reads the
+# user's own config, so a test can't set the theme through it.
+read_theme_colors() {
     local g name dir bin
     g="$(ghostty_bin)"
     [ -n "$g" ] || return 0
-    name="$("$g" +show-config 2>/dev/null | sed -n 's/^theme = //p' | head -n 1)"
+    name="${GHOSTTY_BG_THEME_NAME:-$("$g" +show-config 2>/dev/null | sed -n 's/^theme = //p' | head -n 1)}"
     bin="$(dirname "$(realpath "$g")")"
     for dir in "${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/themes" "${GHOSTTY_RESOURCES_DIR:-/nonexistent}/themes" \
         "$bin/../Resources/ghostty/themes" "$bin/../share/ghostty/themes"; do
         [ -n "$name" ] && [ -f "$dir/$name" ] || continue
         # "palette = 4=#525fb8" splits at both = signs: palette, 4, #525fb8.
-        awk -F ' *= *' '$1 == "background" { print "background", $2 }
+        awk -F ' *= *' '$1 == "background" || $1 == "foreground" { print $1, $2 }
             $1 == "palette" && $2 >= 1 && $2 <= 15 { print $2, $3 }' "$dir/$name"
+        "$g" +show-config --default 2>/dev/null | awk -F ' *= *' '$1 == "faint-opacity" { print $1, $2 }'
         return 0
     done
 }
 
-# Lighten the theme's dim palette colors, in the local config, as far as a
-# gradient needs: one blending the COLORS given over the theme's background
-# at OPACITY. Against its brightest point, each color should keep the
-# contrast it has on the plain theme (at most TEXT_CONTRAST), less the
-# TEXT_TOLERANCE allowance. A color is lightened by mixing it toward white
-# in linear light, which keeps its hue and has a closed form, since
-# luminance is linear there. Palette 0, the usual background black, is left
-# alone, as is any color already bright enough.
+# The theme's colors as read once at the start (THEME_COLORS): every
+# gradient's starting opacity needs them, and the picker lists them all.
+theme_colors() { [ -z "$THEME_COLORS" ] || printf '%s\n' "$THEME_COLORS"; }
+
+# Strengthen the theme's dim palette colors, in the local config, as far as
+# a gradient needs: one blending the COLORS given over the theme's
+# background at OPACITY. Against its point nearest the ink (its brightest
+# on a dark theme, its darkest on a light one), each color should keep the
+# contrast it has on the plain theme (at most TEXT_CONTRAST), less its
+# allowance. A color is strengthened by mixing it toward the
+# ink in linear light, which keeps its hue and has a closed form, since
+# luminance is linear there. Colors on the background's other side, like a
+# dark theme's black, are left alone, as is any color already strong enough.
 fit_text() {
     local opacity=$1
     shift
     unset_conf palette
-    theme_colors | awk -v o="$opacity" -v stops="$*" -v cap="$TEXT_CONTRAST" -v tol="$TEXT_TOLERANCE" '
-        function hx(s, i) { return index("0123456789abcdef", tolower(substr(s, i, 1))) - 1 }
-        function ch(c, i) { return hx(c, i) * 16 + hx(c, i + 1) }
-        function lin(v) { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ^ 2.4 }
-        function enc(v) { v = v <= 0.0031308 ? v * 12.92 : 1.055 * v ^ (1 / 2.4) - 0.055; return int(v * 255 + 0.5) }
-        function lum(r, g, b) { return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) }
+    theme_colors | awk -v o="$opacity" -v stops="$*" -v cap="$TEXT_CONTRAST" -v tol="$TEXT_TOLERANCE" "$COLOR_AWK"'
         $1 == "background" { bg = $2; next }
+        $1 !~ /^[0-9]+$/ { next }
         { n++; key[n] = $1; col[n] = $2 }
         END {
             if (bg == "") exit
-            lt = lum(ch(bg, 2), ch(bg, 4), ch(bg, 6)); lb = lt
-            m = split(stops, s, " ")
-            for (i = 1; i <= m; i++) {
-                for (k = 2; k <= 6; k += 2) v[k] = ch(bg, k) + o * (ch(s[i], k) - ch(bg, k))
-                l = lum(v[2], v[4], v[6]); if (l > lb) lb = l
-            }
+            lt = lum(ch(bg, 2), ch(bg, 4), ch(bg, 6)); INK = ink(lt); tol = allowance(tol)
+            m = split(stops, s, " "); lb = nearest(bg, s, m, o, lt)
             for (i = 1; i <= n; i++) {
                 c = col[i]; L = lum(ch(c, 2), ch(c, 4), ch(c, 6))
-                if (L <= lt) continue
-                want = (L + 0.05) / (lt + 0.05); if (want > cap) want = cap
-                need = want * (lb + 0.05) / tol - 0.05
-                if (L >= need) continue
-                t = need >= 1 ? 1 : (need - L) / (1 - L)
+                if (!nearer(L, lt)) continue
+                want = contrast(L, lt); if (want > cap) want = cap
+                need = INK ? want * (lb + 0.05) / tol - 0.05 : (lb + 0.05) * tol / want - 0.05
+                if (!nearer(need, L)) continue
+                t = nearer(need, INK) ? 1 : (need - L) / (INK - L)
                 out = "#"
-                for (k = 2; k <= 6; k += 2) { x = lin(ch(c, k)); out = out sprintf("%02x", enc(x + t * (1 - x))) }
+                for (k = 2; k <= 6; k += 2) { x = lin(ch(c, k)); out = out sprintf("%02x", enc(x + t * (INK - x))) }
                 printf "palette = %s=%s\n", key[i], out
             }
         }' >>"$CONF"
+}
+
+# Raise Ghostty's faint-opacity, in the local config, as far as the same
+# gradient needs. Faint text is the foreground drawn at that opacity over
+# whatever is behind it, so a gradient changes it the way it changes the
+# background. Against the gradient's point nearest the ink, it should keep
+# the contrast Ghostty's default gives it on the plain theme, less its
+# allowance. In steps of 0.05; nothing is written where the default does,
+# and 1 where nothing less will (faint text then looks like the rest).
+fit_faint() {
+    local opacity=$1 faint
+    shift
+    unset_conf faint-opacity
+    faint="$(theme_colors | awk -v o="$opacity" -v stops="$*" -v tol="$TEXT_TOLERANCE" "$COLOR_AWK"'
+        # Color A moved toward color B by F, in the encoded values, as the
+        # shader and Ghostty blend them.
+        function mix(a, b, f,    k, out) {
+            out = "#"
+            for (k = 2; k <= 6; k += 2) out = out sprintf("%02x", int(ch(a, k) + f * (ch(b, k) - ch(a, k)) + 0.5))
+            return out
+        }
+        function lumof(c) { return lum(ch(c, 2), ch(c, 4), ch(c, 6)) }
+        { v[$1] = $2 }
+        END {
+            bg = v["background"]; fg = v["foreground"]; base = v["faint-opacity"]
+            if (bg == "" || fg == "" || base == "") exit
+            lt = lumof(bg); INK = ink(lt)
+            m = split(stops, s, " ")
+            for (i = 1; i <= m; i++) { c = mix(bg, s[i], o); if (p == "" || nearer(lumof(c), lumof(p))) p = c }
+            want = contrast(lumof(mix(bg, fg, base)), lt) / allowance(tol)
+            for (step = int(base * 20 + 0.5); step < 20; step++)
+                if (contrast(lumof(mix(p, fg, step / 20)), lumof(p)) >= want) break
+            if (step / 20 > base) print step / 20
+        }')"
+    [ -z "$faint" ] || set_conf faint-opacity "$faint"
+}
+
+# Undo fit_text and fit_faint, for a background they don't apply to.
+unfit_text() {
+    unset_conf palette
+    unset_conf faint-opacity
 }
 
 # A bar WIDTH cells wide and HEIGHT rows tall, in truecolor, running through
@@ -818,6 +893,8 @@ pick() {
     trap - INT
     activate "$name"
 }
+
+THEME_COLORS="$(read_theme_colors)"
 
 # The picker's preview pane calls back in as `ghostty-bg --preview NAME`.
 if [ "${1:-}" = "--preview" ]; then
