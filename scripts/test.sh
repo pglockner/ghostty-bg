@@ -89,6 +89,9 @@ compiles() {
     glslangValidator -G "$work/check.frag" -o /dev/null
 }
 
+# Which way fragCoord's y runs on this machine: down under Metal, up under OpenGL.
+if [ "$(uname)" = Darwin ]; then ydown=true; else ydown=false; fi
+
 failed=0
 # check DESCRIPTION COMMAND...: run COMMAND quietly and report whether it held.
 check() {
@@ -110,6 +113,7 @@ check "every gradient runs to its brighter end at the bottom right" bright_corne
 
 bg orchid >/dev/null
 check "a gradient starts at its preset's opacity" test -e "$shaders/orchid-0.7.glsl"
+check "a gradient is told which way y runs here" has "$shaders/orchid-0.7.glsl" "^const bool Y_DOWN = $ydown;"
 check "a still gradient isn't animated" has "$conf" '^custom-shader-animation = false$'
 
 bg -a thermal >/dev/null
@@ -143,6 +147,7 @@ check "GHOSTTY_BG_IMAGES points at another image folder" has "$conf" "^backgroun
 bg jellyfish >/dev/null
 check "leaving an image drops its opacity line" lacks "$conf" '^background-image'
 check "a scene gets its strength put in front" has "$shaders/jellyfish-0.25.glsl" '^const float STRENGTH = 0.250;$'
+check "a scene is told which way y runs here" has "$shaders/jellyfish-0.25.glsl" "^const bool Y_DOWN = $ydown;"
 check "a scene is animated" has "$conf" '^custom-shader-animation = true$'
 glsl "a scene compiles"
 bg lake >/dev/null

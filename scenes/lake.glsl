@@ -2,7 +2,8 @@
 // from soft blue to cream and pale gold where it mirrors the low sun, and
 // tiny boats wander across it, each trailing a long, foaming wake between
 // faint spreading waves. Made for light themes. ghostty-bg puts
-// `const float STRENGTH` (the opacity) in front of this file.
+// `const float STRENGTH` (the opacity) and `const bool Y_DOWN` (whether
+// fragCoord's y runs down the screen) in front of this file.
 
 // ghostty-bg starts this scene at opacity 0.5.
 
@@ -214,9 +215,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
     vec4 term = texture(iChannel0, uv);
 
-    // Ghostty's y runs downward; q runs up from the bottom, in screen heights.
+    // q runs up from the bottom, in screen heights, whichever way
+    // Ghostty's y runs.
     float aspect = iResolution.x / iResolution.y;
-    vec2 q = vec2(fragCoord.x, iResolution.y - fragCoord.y) / iResolution.y;
+    vec2 q = (Y_DOWN ? vec2(fragCoord.x, iResolution.y - fragCoord.y) : fragCoord) / iResolution.y;
     float px = 1.0 / iResolution.y;
     float g = clamp(dot(q - vec2(0.0, 1.0), vec2(aspect, -1.0)) / (aspect * aspect + 1.0), 0.0, 1.0);
 

@@ -86,10 +86,12 @@ scene, which is made for light ones.
 
 A scene is a shader kept as scenes/NAME.glsl in ghostty-bg's own folder,
 NAME in lowercase letters. It is copied in with `const float STRENGTH` (the
-opacity) put in front, and is always animated. To add one, add a file there
-that defines mainImage and uses STRENGTH and iBackgroundColor the way the
-others do, with a line "// ghostty-bg starts this scene at opacity N." to
-start it somewhere other than 0.25.
+opacity) and `const bool Y_DOWN` (whether fragCoord's y runs down the
+screen: it does on macOS, not on Linux) put in front, and is always
+animated. To add one, add a file there that defines mainImage and uses
+STRENGTH, Y_DOWN and iBackgroundColor the way the others do, with a line
+"// ghostty-bg starts this scene at opacity N." to start it somewhere other
+than 0.25.
 USAGE
 }
 
@@ -392,6 +394,11 @@ ramp() {
     }'
 }
 
+# Whether a shader's fragCoord.y runs down the screen: Ghostty gives both
+# backends the same fragCoord, which Metal (macOS) starts at the top left
+# and OpenGL (Linux) at the bottom left. The shaders take it from Y_DOWN.
+y_down() { if [ "$(uname)" = Darwin ]; then echo true; else echo false; fi; }
+
 # Ghostty hands a shader the finished screen, text included, so the gradient
 # is added only where a pixel is close to the theme's background color.
 write_shader() {
@@ -412,16 +419,18 @@ $colors);
 const float ANGLE = $angle.0;     // CSS-style degrees
 const float STRENGTH = $strength;  // how much shows over the background
 const float SPEED = $speed;      // palette cycles per second
+const bool Y_DOWN = $(y_down);    // whether fragCoord's y runs down the screen
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
     vec4 term = texture(iChannel0, uv);
 
-    // Position along the gradient, 0 at the start corner and 1 at the end.
-    // Ghostty's y runs downward.
+    // Position along the gradient, 0 at the start corner and 1 at the end,
+    // with y running down the screen, whichever way Ghostty's runs.
+    vec2 p = Y_DOWN ? uv : vec2(uv.x, 1.0 - uv.y);
     float a = radians(ANGLE);
     vec2 dir = vec2(sin(a), -cos(a));
-    float t = dot(uv - 0.5, dir) / (abs(dir.x) + abs(dir.y)) + 0.5;
+    float t = dot(p - 0.5, dir) / (abs(dir.x) + abs(dir.y)) + 0.5;
 
     // The palette is a loop, first to last and back to the first, and the
     // screen shows all but its last step: first to last when still. Time
@@ -551,8 +560,8 @@ follows_appearance() {
     [ -z "$side" ] || echo "Text colors fit your theme's $side side; switch ghostty-bg again after the system appearance changes."
 }
 
-# Copy the scene NAME's shader in, with its strength put in front. A scene
-# always moves, so it is always animated.
+# Copy the scene NAME's shader in, with its strength and which way y runs
+# put in front. A scene always moves, so it is always animated.
 activate_scene() {
     local name=$1 file
     [ -z "$OPACITY" ] || remember_opacity "$name" "$OPACITY"
@@ -560,6 +569,7 @@ activate_scene() {
     {
         echo "// Written by ghostty-bg from its scenes/$name.glsl; edit that, not this file."
         echo "const float STRENGTH = $(strength "$name");"
+        echo "const bool Y_DOWN = $(y_down);  // whether fragCoord's y runs down the screen"
         cat "$SCENES/$name.glsl"
     } >"$(new_shader "$file")"
     use_shader "$file" true

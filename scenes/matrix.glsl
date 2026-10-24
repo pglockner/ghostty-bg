@@ -1,6 +1,7 @@
 // Slow, muted Matrix code: strings of mirrored katakana dropping down the
 // screen, each led by a pale head and fading behind it. ghostty-bg puts
-// `const float STRENGTH` (the opacity) in front of this file.
+// `const float STRENGTH` (the opacity) and `const bool Y_DOWN` (whether
+// fragCoord's y runs down the screen) in front of this file.
 
 const vec2 CELL = vec2(21.0, 27.0);  // pixels per character
 const float SPEED = 1.0;             // cells per second, roughly
@@ -77,8 +78,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
     vec4 term = texture(iChannel0, uv);
 
-    // Ghostty's y runs downward, the way the code falls.
-    vec2 cell = floor(fragCoord / CELL);
+    // Pixels with y running down the screen, the way the code falls,
+    // whichever way Ghostty's y runs.
+    vec2 p = Y_DOWN ? fragCoord : vec2(fragCoord.x, iResolution.y - fragCoord.y);
+    vec2 cell = floor(p / CELL);
     float rows = iResolution.y / CELL.y;
 
     // Two strings per column, each with its own speed, length and gap.
@@ -99,7 +102,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float pace = mix(0.05, 0.4, hash(cell + 7.0));
     float tick = floor(iTime * pace + hash(cell + 3.0));
     int g = int(hash(cell + tick * 0.618) * float(GLYPHS)) % GLYPHS;
-    float ink = trail > 0.0 ? glyph(g, fract(fragCoord / CELL)) : 0.0;
+    float ink = trail > 0.0 ? glyph(g, fract(p / CELL)) : 0.0;
     vec3 code = mix(TRAIL * trail, HEAD, head) * ink;
 
     // 1 on the background, fading to 0 as the pixel moves away from it.

@@ -104,9 +104,11 @@ elsewhere or sync them between machines.
 
 A scene is a GLSL file in `scenes/` that defines `mainImage`, the way
 [Shadertoy](https://www.shadertoy.com) shaders do. ghostty-bg puts
-`const float STRENGTH` (the opacity) in front of it; use it, and
-`iBackgroundColor`, to tint only the background, as `scenes/matrix.glsl`
-does. A line `// ghostty-bg starts this scene at opacity N.` starts it
+`const float STRENGTH` (the opacity) and `const bool Y_DOWN` in front of
+it; use `STRENGTH` and `iBackgroundColor` to tint only the background, as
+`scenes/matrix.glsl` does. Ghostty's `fragCoord.y` runs down the screen on
+macOS (Metal) and up it on Linux (OpenGL), so the scenes take their own
+sense of up from `Y_DOWN` rather than from `fragCoord`. A line `// ghostty-bg starts this scene at opacity N.` starts it
 somewhere other than 0.25, as `scenes/lake.glsl` does. `scripts/test.sh` lints ghostty-bg, runs it against a throwaway
 config folder, and compiles the shaders if `glslangValidator` is installed.
 
