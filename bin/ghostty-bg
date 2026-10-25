@@ -22,6 +22,7 @@ Usage: ghostty-bg                        list the backgrounds, active one starre
        ghostty-bg -o N                   change the active background's opacity
        ghostty-bg -r [NAME]              back to its starting opacity
        ghostty-bg -R                     every background back to its own
+       ghostty-bg -n                     no background: Ghostty as it is on its own
        ghostty-bg --png GRADIENT         save a gradient as an image
 
 Switching writes ~/.config/ghostty-bg/ghostty-bg.conf. Include it from
@@ -45,6 +46,9 @@ Linux).
                    background) and switch to it at its starting opacity.
   -R, --reset-all  forget every remembered opacity, and put the active
                    background back at its starting opacity.
+  -n, --none       take the background away, leaving Ghostty's config as
+                   it is without ghostty-bg. The opacities stay remembered,
+                   so each background comes back at its own.
   -p, --pick       choose a background in fzf, which shows each gradient's
                    colors and how it will look over the theme's background,
                    then asks for its opacity (enter keeps it) and, for a
@@ -157,6 +161,7 @@ ANIMATED=0
 PICK=0
 PNG=0
 RESET=0
+NONE=0
 
 # Gradients, one per line: name (one word), angle (CSS-style: 180 runs top
 # to bottom, 135 toward the bottom right), two or more colors from start to
@@ -450,9 +455,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 GLSL
 }
 
-said() {
-    local msg
-    msg="Background: $1 at $(opacity_of "$1")$2."
+said() { report "Background: $1 at $(opacity_of "$1")$2."; }
+
+# Print MSG, then whether Ghostty took it up.
+report() {
+    local msg=$1
     if ! in_use; then
         echo "$msg Ghostty's config doesn't include $(shown "$CONF") yet; ghostty-bg -h shows the line to add."
     elif reload_ghostty; then
@@ -526,6 +533,18 @@ activate_image() {
     set_conf background-image-opacity "$(opacity_of "$name")"
     unfit_text
     said "$name" ""
+}
+
+# Take the background away: the config keeps nothing but its heading, so
+# Ghostty is as it is on its own. The remembered opacities stay.
+deactivate() {
+    rm -f "$SHADERS"/*.glsl
+    unset_conf custom-shader
+    unset_conf custom-shader-animation
+    unset_conf background-image
+    unset_conf background-image-opacity
+    unfit_text
+    report "Background: none."
 }
 
 # Write the gradient NAME's shader and point the config at it. The opacity
@@ -858,10 +877,14 @@ pick_row() {
     printf '%s\t%s %-10s %-5s %s %s\n' "$1" "$mark" "$1" "$(opacity_of "$1")" "$3" "$4"
 }
 
-# Every background as a picker line: gradients, then images, then scenes.
+# Every background as a picker line: none, then gradients, images and
+# scenes. The none row's name is -n, so trying or choosing it runs
+# `ghostty-bg -n`.
 pick_rows() {
-    local current=$1 name blank
+    local current=$1 name blank mark=' '
     blank="$(printf '%16s' '')"
+    [ -n "$current" ] || mark='*'
+    printf '%s\t%s %-10s %-5s %s %s\n' -n "$mark" none "" "$blank" "no background"
     printf '%s\n' "$PRESETS" | awk '{ print $1 }' | sort | while IFS= read -r name; do
         # shellcheck disable=SC2046
         pick_row "$name" "$current" "$(bar 16 1 "" 1 $(colors_of "$name"))" gradient
@@ -874,7 +897,9 @@ pick_rows() {
 # passes the theme's background in GHOSTTY_BG_THEME.
 preview() {
     local name=$1 width=${FZF_PREVIEW_COLUMNS:-40} bg=${GHOSTTY_BG_THEME:-}
-    if [ -e "$DIR/$name.jpg" ]; then
+    if [ "$name" = -n ]; then
+        echo "none: no background, Ghostty's own config as it is without ghostty-bg"
+    elif [ -e "$DIR/$name.jpg" ]; then
         echo "$name: an image, at opacity $(opacity_of "$name")"
         echo
         echo "$(shown "$DIR")/$name.jpg"
@@ -910,12 +935,16 @@ background_lines() { grep -E '^(custom-shader|custom-shader-animation|background
 # Put back what was in use when the picker opened (ORIGINAL, with its
 # config lines in ORIGINAL_LINES), if ctrl-t tried something else since.
 restore_original() {
-    [ -n "${ORIGINAL:-}" ] && [ "$(background_lines)" != "$ORIGINAL_LINES" ] || return 0
+    [ "${ORIGINAL+set}" = set ] && [ "$(background_lines)" != "$ORIGINAL_LINES" ] || return 0
     (
         OPACITY=
         ANIMATED=0
-        printf '%s\n' "$ORIGINAL_LINES" | grep -q '^custom-shader = .*-animated\.glsl$' && ANIMATED=1
-        activate "$ORIGINAL"
+        if [ -z "$ORIGINAL" ]; then
+            deactivate
+        else
+            printf '%s\n' "$ORIGINAL_LINES" | grep -q '^custom-shader = .*-animated\.glsl$' && ANIMATED=1
+            activate "$ORIGINAL"
+        fi
     ) >/dev/null
 }
 
@@ -955,6 +984,10 @@ pick() {
     if [ "$(printf '%s\n' "$choice" | sed -n 1p)" = ctrl-s ]; then
         restore_original
         export_png "$name"
+        return
+    fi
+    if [ "$name" = -n ]; then
+        deactivate
         return
     fi
     trap cancelled INT
@@ -998,14 +1031,16 @@ for arg in "$@"; do
         --pick) set -- "$@" -p ;;
         --reset) set -- "$@" -r ;;
         --reset-all) set -- "$@" -R ;;
+        --none) set -- "$@" -n ;;
         --png) set -- "$@" -i ;;
         *) set -- "$@" "$arg" ;;
     esac
 done
-while getopts "o:apirRh" opt; do
+while getopts "o:anpirRh" opt; do
     case "$opt" in
         o) OPACITY=$OPTARG ;;
         a) ANIMATED=1 ;;
+        n) NONE=1 ;;
         p) PICK=1 ;;
         i) PNG=1 ;;
         r) RESET=1 ;;
@@ -1030,7 +1065,10 @@ if [ "$RESET" != 0 ]; then
     fi
 fi
 
-if [ "$PNG" -eq 1 ]; then
+if [ "$NONE" -eq 1 ]; then
+    [ "$#" -eq 0 ] && [ -z "$OPACITY" ] && [ "$ANIMATED$PICK$PNG$RESET" = 0000 ] || die "-n takes the background away; it takes nothing else"
+    deactivate
+elif [ "$PNG" -eq 1 ]; then
     [ "$#" -eq 1 ] || die "name the gradient to save: ghostty-bg --png GRADIENT"
     export_png "$1"
 elif [ "$PICK" -eq 1 ]; then

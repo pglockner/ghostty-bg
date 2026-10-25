@@ -68,6 +68,7 @@ config-file = ?~/.config/ghostty-bg/ghostty-bg.conf
 | `ghostty-bg -a lagoon` | switch to a gradient whose colors flow |
 | `ghostty-bg ~/Pictures/sky.jpg` | copy an image in and switch to it |
 | `ghostty-bg -r` / `-R` | back to the starting opacity, for one or every background |
+| `ghostty-bg -n` | no background: Ghostty as it is on its own |
 | `ghostty-bg --png dusk` | save a gradient as a 3840x2160 PNG in `~/Pictures/ghostty-bg/` |
 
 `ghostty-bg -h` has the details.

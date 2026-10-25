@@ -46,6 +46,7 @@ warns() { bg "$@" | grep -q 'readable up to'; }   # ARGS: switching warns it's t
 light() { GHOSTTY_BG_THEME_NAME='Atom One Light' "$@"; }   # COMMAND...: run it over a light theme
 pair() { GHOSTTY_BG_THEME_NAME='light:Atom One Light,dark:Fish Tank' "$@"; }   # COMMAND...: over one that follows the appearance
 empty() { [ -z "$(ls -A "$1")" ]; }   # DIR
+bg_stars() { bg | grep -q '^\*'; }   # the listing stars a background
 pixel() { im "$1" -format "%[hex:p{$2}]" info:; }   # FILE X,Y
 # awk functions for the color checks. Colors are "#rrggbb": ch(c, i) is
 # the channel starting at i (2, 4 or 6), lum(c) the luminance in linear
@@ -179,6 +180,20 @@ else
 fi
 check "a theme that follows the system appearance says so" pair says glacier 'appearance changes'
 check "a theme that follows the system appearance gets its text fitted" has "$conf" '^palette'
+
+bg -o 0.5 glacier >/dev/null
+bg -n >/dev/null
+check "-n clears the shader" empty "$shaders"
+check "-n drops the shader lines" lacks "$conf" '^custom-shader'
+check "-n drops the image lines" lacks "$conf" '^background-image'
+check "-n drops the lifted colors" lacks "$conf" '^palette'
+check "-n keeps the remembered opacities" has "$opacities" '^glacier 0.5$'
+check "-n stars nothing in the listing" fails bg_stars
+check "-n says so" says -n 'Background: none'
+check "-n with a name fails" fails bg -n orchid
+check "-n with an opacity fails" fails bg -n -o 0.5
+check "the picker previews none" previews -n 'no background'
+check "an opacity with no background fails" fails bg -o 0.5
 
 bg orchid >/dev/null
 cp "$conf" "$work/before.conf"
