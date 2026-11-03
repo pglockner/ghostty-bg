@@ -101,6 +101,19 @@ USAGE
 
 die() { echo "ghostty-bg: $*" >&2; exit 1; }
 
+# The command that installs PACKAGE with this system's package manager.
+# Fedora and openSUSE spell ImageMagick with capitals.
+install_hint() {
+    if command -v brew >/dev/null 2>&1; then echo "brew install $1"
+    elif command -v pacman >/dev/null 2>&1; then echo "sudo pacman -S $1"
+    elif command -v apt-get >/dev/null 2>&1; then echo "sudo apt install $1"
+    elif command -v dnf >/dev/null 2>&1; then echo "sudo dnf install ${1/imagemagick/ImageMagick}"
+    elif command -v zypper >/dev/null 2>&1; then echo "sudo zypper install ${1/imagemagick/ImageMagick}"
+    elif command -v apk >/dev/null 2>&1; then echo "sudo apk add $1"
+    else echo "install the $1 package"
+    fi
+}
+
 # ghostty-bg's own folder, through any link to this script.
 REPO="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 SCENES="$REPO/scenes"
@@ -516,7 +529,7 @@ im() {
     elif command -v convert >/dev/null 2>&1; then
         convert "$@"
     else
-        die "needs ImageMagick: brew install imagemagick, or the imagemagick package on Linux"
+        die "needs ImageMagick: $(install_hint imagemagick)"
     fi
 }
 
@@ -961,7 +974,7 @@ cancelled() {
 # in use when it opened is put back.
 pick() {
     local current rows pos choice name value answer hint max
-    command -v fzf >/dev/null 2>&1 || die "picking needs fzf: brew install fzf"
+    command -v fzf >/dev/null 2>&1 || die "picking needs fzf: $(install_hint fzf)"
     current="$(active)"
     ORIGINAL=$current
     ORIGINAL_LINES="$(background_lines)"

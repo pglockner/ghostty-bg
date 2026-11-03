@@ -42,13 +42,14 @@ for the picker, and ImageMagick for importing images and `--png`;
 everything else works without them.
 
 ```sh
-brew install fzf imagemagick          # macOS
-sudo apt install fzf imagemagick      # Debian, Ubuntu
-
 git clone https://github.com/pglockner/ghostty-bg.git ~/projects/ghostty-bg
-mkdir -p ~/.local/bin
-ln -s ~/projects/ghostty-bg/bin/ghostty-bg ~/.local/bin/ghostty-bg
+~/projects/ghostty-bg/scripts/install.sh
 ```
+
+The script installs fzf and ImageMagick if they're missing, with Homebrew,
+pacman, apt, dnf, zypper or apk, whichever it finds; links `ghostty-bg` into
+`~/.local/bin`; and checks Ghostty's config for the line below. It's safe to
+run again.
 
 Then add this line to Ghostty's config file (cmd-, opens it on macOS,
 ctrl-, on Linux); the `?` lets Ghostty start before the file exists:
