@@ -17,6 +17,7 @@ const float FIRE_RIGHT = 0.62;
 const int SPARKS = 14;
 const float LINES = 480.0;    // the tape's lines, top to bottom, as on NTSC
 const float BLEED = 0.007;    // how far color smears right, in screen heights
+const float BUMP = 0.35;      // how hard the bark's blocks stand out
 // The camcorder's clock starts at 11:40 PM on December 24, 1988.
 const float CLOCK = 23.0 * 60.0 + 40.0;
 const int YEAR = 1988;
@@ -88,8 +89,10 @@ vec3 wall(vec2 q, float x, float fl) {
     return col * light * vec3(1.0, 0.55, 0.28);
 }
 
-// Charred bark's blocks: for cell point p, how far it is from the
-// nearest crack between blocks (0 on a crack), and a number for its block.
+// Charred bark's blocks: the squarish checks it splits into, uneven in
+// size. For cell point p, how far it is from the nearest crack (0 on a
+// crack), and a number for its block. Distances are measured square-wise,
+// so the blocks come out boxy rather than round.
 float blocks(vec2 p, out float id) {
     vec2 i = floor(p), f = fract(p);
     float d1 = 8.0, d2 = 8.0;
@@ -97,21 +100,32 @@ float blocks(vec2 p, out float id) {
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             vec2 g = vec2(x, y);
-            vec2 o = g + 0.15 + 0.7 * vec2(hash2(i + g), hash2(i + g + 17.3)) - f;
-            float d = dot(o, o);
+            vec2 o = abs(g + 0.1 + 0.8 * vec2(hash2(i + g), hash2(i + g + 17.3)) - f);
+            float d = max(o.x, o.y);
             if (d < d1) { d2 = d1; d1 = d; best = i + g; }
             else if (d < d2) d2 = d;
         }
     }
     id = hash2(best + 3.1);
-    return sqrt(d2) - sqrt(d1);
+    return d2 - d1;
 }
 
-// Log from a to b, r thick, over col: charcoal split into blocks by deep
-// black cracks, ash-grey where the firelight catches its top, with only a
-// trace of ember deep in the cracks underneath. A broken log ends at b in
-// jagged splinters, burning hot inside. Around it, a soft shadow falls on
-// what is behind.
+// How far charred bark stands out at block point p, 0 deep in a crack to
+// about 1: each block a raised slab with bevelled edges, a little rough
+// on top. id says which block.
+float bark(vec2 p, out float id) {
+    float edge = blocks(p, id);
+    return smoothstep(0.0, 0.22, edge) * mix(0.6, 1.0, id) + 0.08 * noise(p * 6.0);
+}
+
+// Log from a to b, r thick, over col: charcoal split into raised blocks
+// by deep black cracks, as if the bark were pushed out along its normals
+// by a height map: each block lit by the fire on its upper bevel and
+// shadowed below, ash-grey on the tops that catch the most light, and the
+// outline knobbly where the blocks stand out. Only a trace of ember
+// glows deep in the cracks underneath. A broken log ends at b in jagged
+// splinters, burning hot inside. Around it, a soft shadow falls on what
+// is behind.
 vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken, float t, float fl) {
     vec2 ab = b - a;
     float len = length(ab);
@@ -120,28 +134,40 @@ vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken,
     if (abs(v) > 1.4 || along < -1.4 * r || along > len + 1.4 * r) return col;
     float cap = r * sqrt(max(0.0, 1.0 - v * v));
     float end = len + (broken ? r * (0.1 + 0.7 * noise(vec2(v * 4.0 + seed, seed))) : cap);
+    float u = along / r;                           // along it, in radii
+    // The blocks, longer along the log than round it, bunched toward its
+    // edges as the round surface turns away, and roughly shaped.
+    float around = asin(clamp(v, -1.0, 1.0));
+    vec2 bp = vec2(u * 1.5, around * 2.4) + seed * vec2(3.7, 1.3);
+    bp += 0.35 * vec2(noise(bp * 1.3), noise(bp * 1.3 + 9.0));
+    float id, id2;
+    float h = bark(bp, id);
+    // The outline follows the bark out and into its cracks.
+    float rr = r * (0.9 + 0.14 * h);
     float px = 0.003;
-    float on = (1.0 - smoothstep(r - px, r, abs(v) * r))
+    float on = (1.0 - smoothstep(rr - px, rr, abs(v) * r))
              * smoothstep(-cap - px, -cap, along) * (1.0 - smoothstep(end - px, end, along));
     float d = length(q - a - dir * clamp(along, 0.0, len)) / r;
     float shade = (1.0 - smoothstep(1.0, 1.35, d)) * (broken ? step(along, len) : 1.0);
     col *= 1.0 - 0.5 * shade;
     if (on <= 0.0) return col;
-    float u = along / r;                           // along it, in radii
-    // The blocks, longer along the log than round it, bunched toward its
-    // edges as the round surface turns away.
-    float id;
-    vec2 bp = vec2(u * 1.7, asin(clamp(v, -1.0, 1.0)) * 2.2) + seed * vec2(3.7, 1.3);
-    bp += 0.35 * vec2(noise(bp * 1.3), noise(bp * 1.3 + 9.0));  // rough, uneven blocks
-    float edge = blocks(bp, id);
-    float crack = 1.0 - smoothstep(0.02, 0.08, edge);
+    // The surface's normal: the round log's, tipped by the bark's slope.
+    float e = 0.04;
+    vec2 g = vec2(bark(bp + vec2(e, 0.0), id2) - h, bark(bp + vec2(0.0, e), id2) - h) / e;
+    vec3 N0 = vec3(0.0, sin(around), cos(around));
+    vec3 N = normalize(N0 - BUMP * (g.x * vec3(1.0, 0.0, 0.0) + g.y * vec3(0.0, cos(around), -sin(around))));
+    // Lit by the fire, above and a little in front, turned into the log's
+    // own frame (along it, across it, out of the screen).
+    vec3 L = normalize(vec3(0.1, 0.8, 0.45));
+    L = vec3(dot(L.xy, dir), dot(L.xy, n), L.z);
+    float lit = 0.1 + 1.2 * max(dot(N, L), 0.0);
     vec3 wood = vec3(0.13, 0.10, 0.085) * mix(0.55, 1.4, id) * (0.75 + 0.5 * noise(bp * 5.0));
-    // Ash on the upper faces, and the firelight falling from above.
-    float top = smoothstep(-0.2, 1.0, v);
-    wood = mix(wood, vec3(0.36, 0.32, 0.29), top * 0.55 * smoothstep(0.25, 0.9, id));
-    wood *= (0.35 + 0.65 * top) * (0.8 + 0.4 * fl) * vec3(1.0, 0.78, 0.6);
-    wood *= 0.55 + 0.45 * sqrt(max(0.0, 1.0 - v * v));
-    wood = mix(wood, vec3(0.008, 0.006, 0.005), crack * 0.9);
+    // Ash on the raised tops that face the fire.
+    wood = mix(wood, vec3(0.38, 0.34, 0.31), smoothstep(0.6, 0.95, h) * smoothstep(0.3, 0.8, dot(N, L)) * smoothstep(0.2, 0.8, id));
+    wood *= lit * (0.8 + 0.4 * fl) * vec3(1.0, 0.78, 0.6);
+    // Deep in the cracks, almost black.
+    float crack = 1.0 - smoothstep(0.0, 0.35, h);
+    wood *= mix(0.03, 1.0, smoothstep(0.0, 0.45, h));
     // Just a trace of ember, deep in the cracks underneath.
     wood += flame(0.35) * crack * (1.0 - smoothstep(-0.9, -0.3, v)) * 0.12 * fl;
     if (broken) {
