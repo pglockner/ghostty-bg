@@ -1,15 +1,18 @@
-// A fire crackling in a brick hearth, played off a worn videotape: logs
-// glowing along their cracks under lapping flames, sparks drifting up,
-// firelight flickering on the sooty bricks, all through soft scanlines,
-// bleeding color, wavering tracking and tape grain, with a camcorder's
-// date stamp in the corner and PLAY on screen as it starts. For the long
-// nights of winter. ghostty-bg puts `const float STRENGTH` (the opacity)
-// and `const bool Y_DOWN` (whether fragCoord's y runs down the screen) in
-// front of this file.
+// A fire crackling in a brick hearth, played off a worn videotape: two
+// logs crossed over a third, and a broken one in front glowing hot where
+// it split, all charred and glowing along their cracks under tall lapping
+// flames, sparks drifting up and firelight flickering on the sooty
+// bricks, seen through soft scanlines, bleeding color, wavering tracking
+// and tape grain, with a camcorder's date stamp in the corner and PLAY on
+// screen as it starts. For the long nights of winter. ghostty-bg puts
+// `const float STRENGTH` (the opacity) and `const bool Y_DOWN` (whether
+// fragCoord's y runs down the screen) in front of this file.
 
 // ghostty-bg starts this scene at opacity 0.4.
 
-const float FIRE_X = 0.55;    // where the fire sits, across the screen
+// How far the fire's middle sits from the right edge, in screen heights,
+// keeping it low and to the right however wide the window is.
+const float FIRE_RIGHT = 0.62;
 const int SPARKS = 14;
 const float LINES = 300.0;    // the tape's lines, top to bottom
 const float BLEED = 0.007;    // how far color smears right, in screen heights
@@ -85,16 +88,24 @@ vec3 wall(vec2 q, float x, float fl) {
 }
 
 // Log from a to b, r thick, over col: dark bark split by glowing cracks,
-// glowing most underneath and where it burns hottest.
-vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, float t, float fl) {
+// glowing most underneath. A broken log ends at b in jagged splinters,
+// burning hot inside. Around it, a soft shadow falls on what is behind.
+vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken, float t, float fl) {
     vec2 ab = b - a;
-    float h = clamp(dot(q - a, ab) / dot(ab, ab), 0.0, 1.0);
-    vec2 n = normalize(vec2(-ab.y, ab.x));
-    float d = length(q - a - ab * h);
-    float on = 1.0 - smoothstep(r - 0.003, r, d);
+    float len = length(ab);
+    vec2 dir = ab / len, n = vec2(-dir.y, dir.x);
+    float along = dot(q - a, dir), v = dot(q - a, n) / r;  // v: -1 underneath to 1 on top
+    if (abs(v) > 1.4 || along < -1.4 * r || along > len + 1.4 * r) return col;
+    float cap = r * sqrt(max(0.0, 1.0 - v * v));
+    float end = len + (broken ? r * (0.1 + 0.7 * noise(vec2(v * 4.0 + seed, seed))) : cap);
+    float px = 0.003;
+    float on = (1.0 - smoothstep(r - px, r, abs(v) * r))
+             * smoothstep(-cap - px, -cap, along) * (1.0 - smoothstep(end - px, end, along));
+    float d = length(q - a - dir * clamp(along, 0.0, len)) / r;
+    float shade = (1.0 - smoothstep(1.0, 1.35, d)) * (broken ? step(along, len) : 1.0);
+    col *= 1.0 - 0.5 * shade;
     if (on <= 0.0) return col;
-    float v = dot(q - a - ab * h, n) / r;          // -1 underneath to 1 on top
-    float u = h * length(ab) / r;                  // along it, in radii
+    float u = along / r;                           // along it, in radii
     float bark = noise(vec2(u * 1.5 + seed, v * 12.0));
     vec3 wood = mix(vec3(0.035, 0.025, 0.02), vec3(0.13, 0.085, 0.055), bark);
     wood *= 0.45 + 0.55 * sqrt(max(0.0, 1.0 - v * v));
@@ -107,22 +118,30 @@ vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, float t, flo
     glow *= 0.7 + 0.5 * noise(vec2(u * 0.8 + seed, t * 0.9));
     wood += flame(0.3 + 0.4 * glow) * glow * fl;
     // Rim light from the flames above.
-    wood += vec3(0.45, 0.16, 0.03) * smoothstep(0.7, 1.0, v) * fl * 0.4;
+    wood += vec3(0.45, 0.16, 0.03) * smoothstep(0.75, 1.0, v) * fl * 0.2;
+    if (broken) {
+        // The broken end, burning through: hottest at the heart of the
+        // wood, cooling back along the log, and pulsing as it breathes.
+        float from = (end - along) / r;
+        float heat = exp(-0.7 * from) * (0.55 + 0.45 * (1.0 - v * v));
+        heat *= 0.75 + 0.4 * noise(vec2(from * 3.0 + seed, t * 1.3));
+        wood = mix(wood, flame(0.45 + 0.5 * heat) * fl, smoothstep(0.08, 0.5, heat));
+    }
     return mix(col, wood, on);
 }
 
 // How hot the flames are at q, 0 to 1, rising in tongues from a base at
-// height y0 around x.
-float flames(vec2 q, float x, float y0, float t) {
+// height y0 around x, w wide each way and reaching up to about tall.
+float flames(vec2 q, float x, float y0, float w, float tall, float t) {
     vec2 p = vec2(q.x - x, q.y - y0);
-    float across = p.x / 0.36;
-    if (abs(across) > 1.2 || p.y < -0.06 || p.y > 0.7) return 0.0;
+    float across = p.x / w;
+    if (abs(across) > 1.2 || p.y < -0.06 || p.y > 1.3 * tall + 0.1) return 0.0;
     // Rising noise, warped sideways so the tongues lick and sway.
     vec2 s = vec2(p.x * 6.0, p.y * 2.6 - t * 1.8);
     s.x += 1.2 * (noise(vec2(s.x * 0.5, s.y * 0.7)) - 0.5) * (0.3 + p.y * 3.0);
     float n = fbm(s);
     float tongues = 0.6 * noise(vec2(p.x * 8.0, -t * 0.6)) + 0.4 * noise(vec2(p.x * 19.0, -t * 1.1));
-    float height = 0.08 + 0.42 * tongues * max(1.0 - across * across, 0.0);
+    float height = max(0.15 * tall + tall * tongues * max(1.0 - across * across, 0.0), 0.01);
     float f = (1.0 - p.y / height) * 1.2 - (n - 0.5) * 1.5;
     f *= (1.0 - smoothstep(0.75, 1.15, abs(across))) * smoothstep(-0.06, 0.02, p.y);
     return clamp(f, 0.0, 1.0);
@@ -137,7 +156,7 @@ vec3 sparks(vec2 q, float x, float t) {
         float run = t / life + hash(n + 2.0);
         float lap = floor(run), age = fract(run);
         if (hash3(vec3(n, lap, 4.0)) < 0.35) continue;  // not every lap
-        vec2 o = vec2(x + (hash3(vec3(n, lap, 1.0)) - 0.5) * 0.6, 0.22);
+        vec2 o = vec2(x + (hash3(vec3(n, lap, 1.0)) - 0.5) * 0.6, i % 4 == 0 ? 0.08 : 0.25);
         float rise = mix(0.35, 0.8, hash3(vec3(n, lap, 2.0)));
         float sway = (hash3(vec3(n, lap, 3.0)) - 0.5) * 0.25;
         vec2 at = o + vec2(sway * age + 0.02 * sin(age * 9.0 + n), rise * age);
@@ -150,11 +169,11 @@ vec3 sparks(vec2 q, float x, float t) {
 
 // The hearth at q (screen heights, up from the bottom left), as recorded.
 vec3 hearth(vec2 q, float aspect, float t) {
-    float x = FIRE_X * aspect;
+    float x = max(aspect - FIRE_RIGHT, 0.5 * aspect);
     float fl = flicker(t);
     vec3 col = wall(q, x, fl);
     // The firebox floor, ash with embers glowing through.
-    float floor0 = 0.14;
+    float floor0 = 0.12;
     if (q.y < floor0) {
         float near = exp(-3.0 * abs(q.x - x));
         vec3 ash = vec3(0.10, 0.09, 0.08) * (0.4 + 0.6 * noise(q * 60.0)) * (0.3 + near * fl);
@@ -162,14 +181,22 @@ vec3 hearth(vec2 q, float aspect, float t) {
         ash += flame(0.3 + 0.35 * ember) * ember * near * near * fl * smoothstep(0.0, floor0, q.y);
         col = mix(ash, col, smoothstep(floor0 - 0.004, floor0, q.y));
     }
-    col += flame(flames(q, x, 0.17, t)) * 0.85;
-    col = burning(col, q, vec2(x - 0.40, 0.11), vec2(x + 0.30, 0.15), 0.05, 1.0, t, fl);
-    col = burning(col, q, vec2(x - 0.22, 0.165), vec2(x + 0.44, 0.115), 0.048, 7.0, t, fl);
-    col = burning(col, q, vec2(x - 0.28, 0.22), vec2(x + 0.20, 0.26), 0.042, 13.0, t, fl);
+    // The broken log's glow, spilling over the floor and the logs behind.
+    vec2 brk = vec2(x, 0.065);
+    col += vec3(1.0, 0.42, 0.10) * 0.7 * fl * exp(-length((q - brk) * vec2(1.0, 1.5)) / 0.08);
+    col += flame(flames(q, x, 0.16, 0.38, 0.62, t)) * 0.85;
+    // A log lying at the back, two crossed in front of it, and in front
+    // of them all one broken in two, its halves meeting in a shallow V.
+    col = burning(col, q, vec2(x - 0.44, 0.13), vec2(x + 0.40, 0.155), 0.05, 1.0, false, t, fl);
+    col = burning(col, q, vec2(x - 0.38, 0.09), vec2(x + 0.25, 0.34), 0.045, 7.0, false, t, fl);
+    col = burning(col, q, vec2(x + 0.34, 0.09), vec2(x - 0.19, 0.33), 0.048, 13.0, false, t, fl);
+    col += flame(flames(q, x, 0.05, 0.1, 0.22, t + 3.0)) * 0.9;
+    col = burning(col, q, vec2(x - 0.47, 0.08), vec2(x - 0.05, 0.06), 0.042, 19.0, true, t, fl);
+    col = burning(col, q, vec2(x + 0.43, 0.075), vec2(x + 0.05, 0.058), 0.04, 23.0, true, t, fl);
     // Flames lapping in front of the logs, and the brightest, hottest
     // ones on top.
-    float f = flames(q, x, 0.27, t + 7.0);
-    col += flame(0.85 * f) * smoothstep(0.55, 0.95, f) * 0.6;
+    float f = flames(q, x, 0.33, 0.3, 0.5, t + 7.0);
+    col += flame(0.85 * f) * smoothstep(0.65, 1.0, f) * 0.5;
     return col + sparks(q, x, t);
 }
 
@@ -296,8 +323,14 @@ vec3 tape(vec2 q, float aspect, float t) {
     vec2 at = vec2(q.x - shift, 1.0 - (line + 0.5) / LINES);
     vec3 pic = hearth(at, aspect, t);
     vec3 smear = hearth(at - vec2(BLEED, 0.0), aspect, t);
-    pic += stamp(at, aspect, t) * vec3(1.0, 0.62, 0.20);
-    smear += stamp(at - vec2(BLEED, 0.0), aspect, t) * vec3(1.0, 0.62, 0.20);
+    // The date stamp, with a dark edge to keep it clear over the fire.
+    vec2 dot1 = vec2(1.0 / LINES);
+    float ink = stamp(at, aspect, t);
+    float rim = max(max(stamp(at + dot1, aspect, t), stamp(at - dot1, aspect, t)),
+                    max(stamp(at + vec2(dot1.x, -dot1.y), aspect, t), stamp(at - vec2(dot1.x, -dot1.y), aspect, t)));
+    pic = mix(pic, vec3(0.0), max(rim - ink, 0.0) * 0.75);
+    pic = mix(pic, vec3(1.0, 0.62, 0.20), ink);
+    smear = mix(smear, vec3(1.0, 0.62, 0.20), stamp(at - vec2(BLEED, 0.0), aspect, t));
 
     // Sharp brightness, smeared color, a little faded and warm.
     vec3 c = vec3(yiq(pic).x, yiq(mix(pic, smear, 0.6)).yz * 1.15);
