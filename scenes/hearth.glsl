@@ -1,13 +1,14 @@
 // A fire crackling in a brick hearth, played off a worn videotape: two
 // logs crossed over a third, and a broken one in front glowing hot where
 // it split, all cracked charcoal glowing where they press together and
-// rest on the coals, under tall lapping flames, sparks drifting up and
-// firelight flickering on the sooty bricks, seen through soft scanlines,
-// bleeding color, wavering tracking and tape grain, with a camcorder's
-// date stamp in the corner and PLAY on screen as it starts. For the long
-// nights of winter. ghostty-bg puts `const float STRENGTH` (the opacity)
-// and `const bool Y_DOWN` (whether fragCoord's y runs down the screen) in
-// front of this file.
+// rest on the coals, small flames sprouting from them here and there,
+// under tall lapping flames, sparks drifting up and firelight flickering
+// on the sooty bricks, seen through soft scanlines, bleeding color,
+// wavering tracking and tape grain, with a camcorder's date stamp in the
+// corner and PLAY on screen as it starts. For the long nights of winter.
+// ghostty-bg puts `const float STRENGTH` (the opacity) and `const bool
+// Y_DOWN` (whether fragCoord's y runs down the screen) in front of this
+// file.
 
 // ghostty-bg starts this scene at opacity 0.4.
 
@@ -15,6 +16,7 @@
 // keeping it low and to the right however wide the window is.
 const float FIRE_RIGHT = 0.62;
 const int SPARKS = 14;
+const int SPROUTS = 9;        // small flames burning on the logs at any time
 const float LINES = 480.0;    // the tape's lines, top to bottom, as on NTSC
 const float BLEED = 0.007;    // how far color smears right, in screen heights
 const float BUMP = 0.35;      // how hard the bark's blocks stand out
@@ -296,6 +298,34 @@ vec3 hearth(vec2 q, float aspect, float t) {
     seam *= patches * (1.0 - smoothstep(0.2, 0.5, q.y)) * (0.8 + 0.3 * fl);
     seam = min(seam, 1.0);
     col += flame(0.25 + 0.4 * seam) * seam * 1.4;
+    // Small flames sprouting from the tops of the logs here and there,
+    // each growing, flickering and dying away, then catching somewhere
+    // else. They hover in front of the whole pile, so none is cut off.
+    for (int i = 0; i < SPROUTS; i++) {
+        float n = float(i);
+        float life = mix(3.0, 7.0, hash(n + 31.0));
+        float run = t / life + hash(n + 32.0);
+        float lap = floor(run), age = fract(run);
+        int k = int(hash3(vec3(n, lap, 6.0)) * float(LOGS)) % LOGS;
+        vec2 ab = B[k] - A[k];
+        vec2 up = normalize(vec2(-ab.y, ab.x));
+        if (up.y < 0.0) up = -up;
+        vec2 at = o + A[k] + ab * mix(0.12, 0.88, hash3(vec3(n, lap, 7.0))) + up * R[k] * 0.7;
+        vec2 p = q - at;
+        if (abs(p.x) > 0.05 || p.y < -0.01 || p.y > 0.17) continue;
+        float grow = smoothstep(0.0, 0.2, age) * (1.0 - smoothstep(0.7, 1.0, age));
+        float tall = mix(0.06, 0.14, hash3(vec3(n, lap, 8.0))) * grow
+                   * (0.75 + 0.4 * noise(vec2(t * 5.0, n * 7.0)));
+        if (tall < 0.005 || p.y > tall) continue;
+        // A thin, pointed lick, swaying more toward its tip.
+        float hgt = clamp(p.y / tall, 0.0, 1.0);
+        p.x += (sin(p.y * 70.0 - t * 9.0 + n * 3.0) * 0.004 + (noise(vec2(t * 2.0, n)) - 0.5) * 0.02) * hgt;
+        float wide = mix(0.011, 0.02, hash3(vec3(n, lap, 9.0))) * pow(1.0 - hgt, 0.6) * smoothstep(0.0, 0.25, hgt + 0.08);
+        float base = smoothstep(-0.01, 0.025, p.y);  // fading in from the bark
+        float f = (1.0 - smoothstep(0.0, wide, abs(p.x))) * (1.0 - hgt * 0.7) * base;
+        float halo = exp(-abs(p.x) / 0.015) * (1.0 - hgt) * base * grow;
+        col += flame(0.3 + 0.65 * f) * smoothstep(0.02, 0.35, f) + vec3(0.5, 0.18, 0.03) * 0.3 * halo;
+    }
     // Flames licking up in front of the pile, only above the logs, so the
     // logs themselves stay dark.
     float clear = 1.0;
