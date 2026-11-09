@@ -250,21 +250,24 @@ vec3 hearth(vec2 q, float aspect, float t) {
         float shown = 1.0;
         for (int k = 0; k < LOGS; k++) if (k > i) shown = min(shown, smoothstep(-0.002, 0.003, D[k]));
         if (shown <= 0.0) continue;
-        float edge = exp(-abs(D[i]) / 0.004) + 0.3 * exp(-abs(D[i]) / 0.015);
+        // Most of the light falls just past its edge, on what is behind.
+        float edge = D[i] > 0.0 ? exp(-D[i] / 0.009) + 0.4 * exp(-D[i] / 0.035) : 0.6 * exp(D[i] / 0.003);
         float over = 0.0;
         for (int j = 0; j < LOGS; j++) if (j < i) over = max(over, smoothstep(0.0, -0.3 * R[j], D[j]));
         // Under it: just outside its lower edge, low in the grate.
         float under = step(0.0, D[i]) * (1.0 - smoothstep(0.03, 0.07, q.y));
         seam += edge * max(over, under) * shown;
     }
-    float patches = smoothstep(0.3, 0.75, noise(q * 28.0 + vec2(t * 0.2, -t * 0.12)));
-    seam *= patches * (1.0 - smoothstep(0.1, 0.4, q.y)) * (0.8 + 0.3 * fl);
+    float patches = smoothstep(0.25, 0.7, noise(q * 11.0 + vec2(t * 0.2, -t * 0.12)));
+    seam *= patches * (1.0 - smoothstep(0.2, 0.5, q.y)) * (0.8 + 0.3 * fl);
     seam = min(seam, 1.0);
-    col += flame(0.35 + 0.55 * seam) * seam * 1.3;
-    // Flames lapping in front of the logs, and the brightest, hottest
-    // ones on top.
+    col += flame(0.25 + 0.4 * seam) * seam * 1.4;
+    // Flames licking up in front of the pile, only above the logs, so the
+    // logs themselves stay dark.
+    float clear = 1.0;
+    for (int i = 0; i < LOGS; i++) clear = min(clear, smoothstep(-0.004, 0.012, D[i]));
     float f = flames(q, x, 0.33, 0.3, 0.5, t + 7.0);
-    col += flame(0.85 * f) * smoothstep(0.65, 1.0, f) * 0.5;
+    col += flame(0.85 * f) * smoothstep(0.65, 1.0, f) * 0.5 * clear;
     return col + sparks(q, x, t);
 }
 
