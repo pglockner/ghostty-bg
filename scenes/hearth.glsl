@@ -94,9 +94,9 @@ vec3 wall(vec2 q, float x, float fl) {
 // Charred bark's blocks: Voronoi cells, the polygons it cracks into. For
 // cell point p, how far it is from the nearest crack (0 on a crack: the
 // exact distance to its cell's border, so the edges come out straight),
-// and a number for its block.
+// a number for its block, and which way that distance grows fastest.
 vec2 site(vec2 c) { return 0.15 + 0.7 * vec2(hash2(c), hash2(c + 17.3)); }
-float blocks(vec2 p, out float id) {
+float blocks(vec2 p, out float id, out vec2 grad) {
     vec2 i = floor(p), f = fract(p);
     vec2 mg = vec2(0.0), mr = vec2(0.0);
     float md = 8.0;
@@ -110,11 +110,17 @@ float blocks(vec2 p, out float id) {
     }
     id = hash2(i + mg + 3.1);
     md = 8.0;
+    grad = vec2(0.0);
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             vec2 g = mg + vec2(x, y);
             vec2 r = g + site(i + g) - f;
-            if (dot(mr - r, mr - r) > 0.0001) md = min(md, dot(0.5 * (mr + r), normalize(r - mr)));
+            if (dot(mr - r, mr - r) > 0.0001) {
+                vec2 toward = normalize(r - mr);
+                float d = dot(0.5 * (mr + r), toward);
+                // Moving toward that border brings it nearer.
+                if (d < md) { md = d; grad = -toward; }
+            }
         }
     }
     return md;
@@ -122,10 +128,15 @@ float blocks(vec2 p, out float id) {
 
 // How far charred bark stands out at block point p, 0 deep in a crack to
 // about 1: each block a raised slab with bevelled edges, a little rough
-// on top. id says which block.
-float bark(vec2 p, out float id) {
-    float edge = blocks(p, id);
-    return smoothstep(0.0, 0.16, edge) * mix(0.6, 1.0, id) + 0.08 * noise(p * 6.0);
+// on top. id says which block, and slope which way it rises, worked out
+// from the cracks' own geometry rather than by looking again nearby.
+float bark(vec2 p, out float id, out vec2 slope) {
+    vec2 grad;
+    float edge = blocks(p, id, grad);
+    float x = clamp(edge / 0.16, 0.0, 1.0);
+    float rise = mix(0.6, 1.0, id);
+    slope = grad * rise * 6.0 * x * (1.0 - x) / 0.16;
+    return x * x * (3.0 - 2.0 * x) * rise + 0.08 * noise(p * 6.0);
 }
 
 // Log from a to b, r thick, over col: charcoal split into raised blocks
@@ -135,8 +146,9 @@ float bark(vec2 p, out float id) {
 // outline knobbly where the blocks stand out. Only a trace of ember
 // glows deep in the cracks underneath. A broken log ends at b in jagged
 // splinters, burning hot inside. Around it, a soft shadow falls on what
-// is behind.
-vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken, float t, float fl) {
+// is behind. A lite log, for the tape's smeared color, is a plain
+// silhouette.
+vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken, bool lite, float t, float fl) {
     vec2 ab = b - a;
     float len = length(ab);
     vec2 dir = ab / len, n = vec2(-dir.y, dir.x);
@@ -149,9 +161,12 @@ vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken,
     // edges as the round surface turns away, and roughly shaped.
     float around = asin(clamp(v, -1.0, 1.0));
     vec2 bp = vec2(u * 1.6, around * 2.2) + seed * vec2(3.7, 1.3);
-    bp += 0.35 * vec2(noise(bp * 1.3), noise(bp * 1.3 + 9.0));
-    float id, id2;
-    float h = bark(bp, id);
+    float id = 0.5, h = 0.6;
+    vec2 g = vec2(0.0);
+    if (!lite && abs(v) < 1.05) {
+        bp += 0.35 * vec2(noise(bp * 1.3), noise(bp * 1.3 + 9.0));
+        h = bark(bp, id, g);
+    }
     // The outline follows the bark out and into its cracks.
     float rr = r * (0.9 + 0.14 * h);
     float px = 0.003;
@@ -162,8 +177,6 @@ vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken,
     col *= 1.0 - 0.5 * shade;
     if (on <= 0.0) return col;
     // The surface's normal: the round log's, tipped by the bark's slope.
-    float e = 0.04;
-    vec2 g = vec2(bark(bp + vec2(e, 0.0), id2) - h, bark(bp + vec2(0.0, e), id2) - h) / e;
     vec3 N0 = vec3(0.0, sin(around), cos(around));
     vec3 N = normalize(N0 - BUMP * (g.x * vec3(1.0, 0.0, 0.0) + g.y * vec3(0.0, cos(around), -sin(around))));
     // Lit by the fire, above and a little in front, turned into the log's
@@ -245,8 +258,19 @@ vec3 sparks(vec2 q, float x, float t) {
     return col;
 }
 
+// Flames licking up in front of the pile, the brightest and hottest, by
+// clear (0 over a log).
+vec3 frontFlames(vec2 q, float x, float t, float clear) {
+    float f = flames(q, x, 0.33, 0.3, 0.5, t + 7.0);
+    return flame(0.85 * f) * smoothstep(0.65, 1.0, f) * 0.5 * clear;
+}
+
 // The hearth at q (screen heights, up from the bottom left), as recorded.
-vec3 hearth(vec2 q, float aspect, float t) {
+// A lite hearth, for the tape's smeared color, which is blurry anyway,
+// leaves out the fine detail: the bark, the small flames, the sparks.
+// Everything else is drawn in the same order in both, so their colors
+// line up.
+vec3 hearth(vec2 q, float aspect, float t, bool lite) {
     float x = max(aspect - FIRE_RIGHT, 0.5 * aspect);
     float fl = flicker(t);
     vec3 col = wall(q, x, fl);
@@ -271,9 +295,13 @@ vec3 hearth(vec2 q, float aspect, float t) {
     vec2 B[LOGS] = vec2[LOGS](vec2(0.40, 0.155), vec2(0.25, 0.34), vec2(-0.19, 0.33), vec2(-0.05, 0.06), vec2(0.05, 0.058));
     float R[LOGS] = float[LOGS](0.05, 0.045, 0.048, 0.042, 0.04);
     vec2 o = vec2(x, 0.0);
+    // The logs, their glow and the small flames are all round the pile;
+    // above and beside it are only the tips of the front flames and the
+    // sparks.
+    if (abs(q.x - x) > 0.6 || q.y > 0.6) return col + frontFlames(q, x, t, 1.0) + (lite ? vec3(0.0) : sparks(q, x, t));
     for (int i = 0; i < LOGS; i++) {
         if (i == 3) col += flame(flames(q, x, 0.05, 0.1, 0.22, t + 3.0)) * 0.9;
-        col = burning(col, q, o + A[i], o + B[i], R[i], 1.0 + 6.0 * float(i), i >= 3, t, fl);
+        col = burning(col, q, o + A[i], o + B[i], R[i], 1.0 + 6.0 * float(i), i >= 3, lite, t, fl);
     }
     // The glow inside the pile: along the seam where a log lies over one
     // behind it, and in the gap under the lowest where they rest on the
@@ -283,6 +311,7 @@ vec3 hearth(vec2 q, float aspect, float t) {
     for (int i = 0; i < LOGS; i++) D[i] = logDist(q, o + A[i], o + B[i], R[i]);
     float seam = 0.0;
     for (int i = 0; i < LOGS; i++) {
+        if (q.y > 0.5) break;
         float shown = 1.0;
         for (int k = 0; k < LOGS; k++) if (k > i) shown = min(shown, smoothstep(-0.002, 0.003, D[k]));
         if (shown <= 0.0) continue;
@@ -298,6 +327,11 @@ vec3 hearth(vec2 q, float aspect, float t) {
     seam *= patches * (1.0 - smoothstep(0.2, 0.5, q.y)) * (0.8 + 0.3 * fl);
     seam = min(seam, 1.0);
     col += flame(0.25 + 0.4 * seam) * seam * 1.4;
+    // The front flames only above the logs, so the logs stay dark.
+    float clear = 1.0;
+    for (int i = 0; i < LOGS; i++) clear = min(clear, smoothstep(-0.004, 0.012, D[i]));
+    col += frontFlames(q, x, t, clear);
+    if (lite) return col;
     // Small flames sprouting from the tops of the logs here and there,
     // each growing, flickering and dying away, then catching somewhere
     // else. They hover in front of the whole pile, so none is cut off.
@@ -326,12 +360,6 @@ vec3 hearth(vec2 q, float aspect, float t) {
         float halo = exp(-abs(p.x) / 0.015) * (1.0 - hgt) * base * grow;
         col += flame(0.3 + 0.65 * f) * smoothstep(0.02, 0.35, f) + vec3(0.5, 0.18, 0.03) * 0.3 * halo;
     }
-    // Flames licking up in front of the pile, only above the logs, so the
-    // logs themselves stay dark.
-    float clear = 1.0;
-    for (int i = 0; i < LOGS; i++) clear = min(clear, smoothstep(-0.004, 0.012, D[i]));
-    float f = flames(q, x, 0.33, 0.3, 0.5, t + 7.0);
-    col += flame(0.85 * f) * smoothstep(0.65, 1.0, f) * 0.5 * clear;
     return col + sparks(q, x, t);
 }
 
@@ -456,16 +484,19 @@ vec3 tape(vec2 q, float aspect, float t) {
     shift += inBand * (noise(vec2(line * 0.5, t * 5.0)) - 0.3) * 0.02;
 
     vec2 at = vec2(q.x - shift, 1.0 - (line + 0.5) / LINES);
-    vec3 pic = hearth(at, aspect, t);
-    vec3 smear = hearth(at - vec2(BLEED, 0.0), aspect, t);
+    vec3 pic = hearth(at, aspect, t, false);
+    vec3 smear = hearth(at - vec2(BLEED, 0.0), aspect, t, true);
     // The date stamp, with a dark edge to keep it clear over the fire.
     vec2 dot1 = vec2(1.0 / LINES);
-    float ink = stamp(at, aspect, t);
-    float rim = max(max(stamp(at + dot1, aspect, t), stamp(at - dot1, aspect, t)),
-                    max(stamp(at + vec2(dot1.x, -dot1.y), aspect, t), stamp(at - vec2(dot1.x, -dot1.y), aspect, t)));
-    pic = mix(pic, vec3(0.0), max(rim - ink, 0.0) * 0.75);
-    pic = mix(pic, vec3(1.0, 0.62, 0.20), ink);
-    smear = mix(smear, vec3(1.0, 0.62, 0.20), stamp(at - vec2(BLEED, 0.0), aspect, t));
+    // (Only near the corner it sits in: it is costly to work out.)
+    if (at.x > aspect - 0.36 && at.y < 0.17) {
+        float ink = stamp(at, aspect, t);
+        float rim = max(max(stamp(at + dot1, aspect, t), stamp(at - dot1, aspect, t)),
+                        max(stamp(at + vec2(dot1.x, -dot1.y), aspect, t), stamp(at - vec2(dot1.x, -dot1.y), aspect, t)));
+        pic = mix(pic, vec3(0.0), max(rim - ink, 0.0) * 0.75);
+        pic = mix(pic, vec3(1.0, 0.62, 0.20), ink);
+        smear = mix(smear, vec3(1.0, 0.62, 0.20), stamp(at - vec2(BLEED, 0.0), aspect, t));
+    }
 
     // Sharp brightness, smeared color, a little faded and warm.
     vec3 c = vec3(yiq(pic).x, yiq(mix(pic, smear, 0.6)).yz * 1.15);
