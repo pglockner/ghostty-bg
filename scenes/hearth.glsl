@@ -1,12 +1,13 @@
 // A fire crackling in a brick hearth, played off a worn videotape: two
 // logs crossed over a third, and a broken one in front glowing hot where
-// it split, all charred and glowing along their cracks under tall lapping
-// flames, sparks drifting up and firelight flickering on the sooty
-// bricks, seen through soft scanlines, bleeding color, wavering tracking
-// and tape grain, with a camcorder's date stamp in the corner and PLAY on
-// screen as it starts. For the long nights of winter. ghostty-bg puts
-// `const float STRENGTH` (the opacity) and `const bool Y_DOWN` (whether
-// fragCoord's y runs down the screen) in front of this file.
+// it split, all cracked charcoal glowing where they press together and
+// rest on the coals, under tall lapping flames, sparks drifting up and
+// firelight flickering on the sooty bricks, seen through soft scanlines,
+// bleeding color, wavering tracking and tape grain, with a camcorder's
+// date stamp in the corner and PLAY on screen as it starts. For the long
+// nights of winter. ghostty-bg puts `const float STRENGTH` (the opacity)
+// and `const bool Y_DOWN` (whether fragCoord's y runs down the screen) in
+// front of this file.
 
 // ghostty-bg starts this scene at opacity 0.4.
 
@@ -87,9 +88,30 @@ vec3 wall(vec2 q, float x, float fl) {
     return col * light * vec3(1.0, 0.55, 0.28);
 }
 
-// Log from a to b, r thick, over col: dark bark split by glowing cracks,
-// glowing most underneath. A broken log ends at b in jagged splinters,
-// burning hot inside. Around it, a soft shadow falls on what is behind.
+// Charred bark's blocks: for cell point p, how far it is from the
+// nearest crack between blocks (0 on a crack), and a number for its block.
+float blocks(vec2 p, out float id) {
+    vec2 i = floor(p), f = fract(p);
+    float d1 = 8.0, d2 = 8.0;
+    vec2 best = i;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 g = vec2(x, y);
+            vec2 o = g + 0.15 + 0.7 * vec2(hash2(i + g), hash2(i + g + 17.3)) - f;
+            float d = dot(o, o);
+            if (d < d1) { d2 = d1; d1 = d; best = i + g; }
+            else if (d < d2) d2 = d;
+        }
+    }
+    id = hash2(best + 3.1);
+    return sqrt(d2) - sqrt(d1);
+}
+
+// Log from a to b, r thick, over col: charcoal split into blocks by deep
+// black cracks, ash-grey where the firelight catches its top, with only a
+// trace of ember deep in the cracks underneath. A broken log ends at b in
+// jagged splinters, burning hot inside. Around it, a soft shadow falls on
+// what is behind.
 vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken, float t, float fl) {
     vec2 ab = b - a;
     float len = length(ab);
@@ -106,20 +128,22 @@ vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken,
     col *= 1.0 - 0.5 * shade;
     if (on <= 0.0) return col;
     float u = along / r;                           // along it, in radii
-    float bark = noise(vec2(u * 1.5 + seed, v * 12.0));
-    vec3 wood = mix(vec3(0.035, 0.025, 0.02), vec3(0.13, 0.085, 0.055), bark);
-    wood *= 0.45 + 0.55 * sqrt(max(0.0, 1.0 - v * v));
-    // Cracks: the ridges of a noise stretched along the log, glowing
-    // where it has burnt through, most of all underneath, each with a soft
-    // haze of heat around it so it doesn't break up on the tape's lines.
-    float ridge = 1.0 - abs(2.0 * noise(vec2(u * 1.2 + seed, v * 3.5 + 0.4 * u)) - 1.0);
-    float burnt = 1.0 - smoothstep(-0.9, 0.5, v) + 0.35 * noise(vec2(u * 0.7 - seed, 3.0));
-    float glow = (0.85 * smoothstep(0.82, 0.97, ridge) + 0.25 * smoothstep(0.6, 0.92, ridge)) * clamp(burnt, 0.0, 1.0);
-    glow += 0.35 * (1.0 - smoothstep(-1.0, -0.6, v));  // the coals' glow from below
-    glow *= 0.7 + 0.5 * noise(vec2(u * 0.8 + seed, t * 0.9));
-    wood += flame(0.3 + 0.4 * glow) * glow * fl;
-    // Rim light from the flames above.
-    wood += vec3(0.45, 0.16, 0.03) * smoothstep(0.75, 1.0, v) * fl * 0.2;
+    // The blocks, longer along the log than round it, bunched toward its
+    // edges as the round surface turns away.
+    float id;
+    vec2 bp = vec2(u * 1.7, asin(clamp(v, -1.0, 1.0)) * 2.2) + seed * vec2(3.7, 1.3);
+    bp += 0.35 * vec2(noise(bp * 1.3), noise(bp * 1.3 + 9.0));  // rough, uneven blocks
+    float edge = blocks(bp, id);
+    float crack = 1.0 - smoothstep(0.02, 0.08, edge);
+    vec3 wood = vec3(0.13, 0.10, 0.085) * mix(0.55, 1.4, id) * (0.75 + 0.5 * noise(bp * 5.0));
+    // Ash on the upper faces, and the firelight falling from above.
+    float top = smoothstep(-0.2, 1.0, v);
+    wood = mix(wood, vec3(0.36, 0.32, 0.29), top * 0.55 * smoothstep(0.25, 0.9, id));
+    wood *= (0.35 + 0.65 * top) * (0.8 + 0.4 * fl) * vec3(1.0, 0.78, 0.6);
+    wood *= 0.55 + 0.45 * sqrt(max(0.0, 1.0 - v * v));
+    wood = mix(wood, vec3(0.008, 0.006, 0.005), crack * 0.9);
+    // Just a trace of ember, deep in the cracks underneath.
+    wood += flame(0.35) * crack * (1.0 - smoothstep(-0.9, -0.3, v)) * 0.12 * fl;
     if (broken) {
         // The broken end, burning through: hottest at the heart of the
         // wood, cooling back along the log, and pulsing as it breathes.
@@ -129,6 +153,12 @@ vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken,
         wood = mix(wood, flame(0.45 + 0.5 * heat) * fl, smoothstep(0.08, 0.5, heat));
     }
     return mix(col, wood, on);
+}
+
+// How far q is outside log a to b, r thick (negative inside).
+float logDist(vec2 q, vec2 a, vec2 b, float r) {
+    vec2 ab = b - a;
+    return length(q - a - ab * clamp(dot(q - a, ab) / dot(ab, ab), 0.0, 1.0)) - r;
 }
 
 // How hot the flames are at q, 0 to 1, rising in tongues from a base at
@@ -198,13 +228,39 @@ vec3 hearth(vec2 q, float aspect, float t) {
     col += vec3(1.0, 0.42, 0.10) * 0.7 * fl * exp(-length((q - brk) * vec2(1.0, 1.5)) / 0.08);
     col += flame(flames(q, x, 0.16, 0.38, 0.62, t)) * 0.85;
     // A log lying at the back, two crossed in front of it, and in front
-    // of them all one broken in two, its halves meeting in a shallow V.
-    col = burning(col, q, vec2(x - 0.44, 0.13), vec2(x + 0.40, 0.155), 0.05, 1.0, false, t, fl);
-    col = burning(col, q, vec2(x - 0.38, 0.09), vec2(x + 0.25, 0.34), 0.045, 7.0, false, t, fl);
-    col = burning(col, q, vec2(x + 0.34, 0.09), vec2(x - 0.19, 0.33), 0.048, 13.0, false, t, fl);
-    col += flame(flames(q, x, 0.05, 0.1, 0.22, t + 3.0)) * 0.9;
-    col = burning(col, q, vec2(x - 0.47, 0.08), vec2(x - 0.05, 0.06), 0.042, 19.0, true, t, fl);
-    col = burning(col, q, vec2(x + 0.43, 0.075), vec2(x + 0.05, 0.058), 0.04, 23.0, true, t, fl);
+    // of them all one broken in two, its halves meeting in a shallow V;
+    // each drawn over the ones before it.
+    const int LOGS = 5;
+    vec2 A[LOGS] = vec2[LOGS](vec2(-0.44, 0.13), vec2(-0.38, 0.09), vec2(0.34, 0.09), vec2(-0.47, 0.08), vec2(0.43, 0.075));
+    vec2 B[LOGS] = vec2[LOGS](vec2(0.40, 0.155), vec2(0.25, 0.34), vec2(-0.19, 0.33), vec2(-0.05, 0.06), vec2(0.05, 0.058));
+    float R[LOGS] = float[LOGS](0.05, 0.045, 0.048, 0.042, 0.04);
+    vec2 o = vec2(x, 0.0);
+    for (int i = 0; i < LOGS; i++) {
+        if (i == 3) col += flame(flames(q, x, 0.05, 0.1, 0.22, t + 3.0)) * 0.9;
+        col = burning(col, q, o + A[i], o + B[i], R[i], 1.0 + 6.0 * float(i), i >= 3, t, fl);
+    }
+    // The glow inside the pile: along the seam where a log lies over one
+    // behind it, and in the gap under the lowest where they rest on the
+    // coals; in patches that brighten and dim slowly, hotter lower down,
+    // and hidden wherever a log in front covers it.
+    float D[LOGS];
+    for (int i = 0; i < LOGS; i++) D[i] = logDist(q, o + A[i], o + B[i], R[i]);
+    float seam = 0.0;
+    for (int i = 0; i < LOGS; i++) {
+        float shown = 1.0;
+        for (int k = 0; k < LOGS; k++) if (k > i) shown = min(shown, smoothstep(-0.002, 0.003, D[k]));
+        if (shown <= 0.0) continue;
+        float edge = exp(-abs(D[i]) / 0.004) + 0.3 * exp(-abs(D[i]) / 0.015);
+        float over = 0.0;
+        for (int j = 0; j < LOGS; j++) if (j < i) over = max(over, smoothstep(0.0, -0.3 * R[j], D[j]));
+        // Under it: just outside its lower edge, low in the grate.
+        float under = step(0.0, D[i]) * (1.0 - smoothstep(0.03, 0.07, q.y));
+        seam += edge * max(over, under) * shown;
+    }
+    float patches = smoothstep(0.3, 0.75, noise(q * 28.0 + vec2(t * 0.2, -t * 0.12)));
+    seam *= patches * (1.0 - smoothstep(0.1, 0.4, q.y)) * (0.8 + 0.3 * fl);
+    seam = min(seam, 1.0);
+    col += flame(0.35 + 0.55 * seam) * seam * 1.3;
     // Flames lapping in front of the logs, and the brightest, hottest
     // ones on top.
     float f = flames(q, x, 0.33, 0.3, 0.5, t + 7.0);
