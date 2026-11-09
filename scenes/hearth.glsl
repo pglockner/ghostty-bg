@@ -89,25 +89,33 @@ vec3 wall(vec2 q, float x, float fl) {
     return col * light * vec3(1.0, 0.55, 0.28);
 }
 
-// Charred bark's blocks: the squarish checks it splits into, uneven in
-// size. For cell point p, how far it is from the nearest crack (0 on a
-// crack), and a number for its block. Distances are measured square-wise,
-// so the blocks come out boxy rather than round.
+// Charred bark's blocks: Voronoi cells, the polygons it cracks into. For
+// cell point p, how far it is from the nearest crack (0 on a crack: the
+// exact distance to its cell's border, so the edges come out straight),
+// and a number for its block.
+vec2 site(vec2 c) { return 0.15 + 0.7 * vec2(hash2(c), hash2(c + 17.3)); }
 float blocks(vec2 p, out float id) {
     vec2 i = floor(p), f = fract(p);
-    float d1 = 8.0, d2 = 8.0;
-    vec2 best = i;
+    vec2 mg = vec2(0.0), mr = vec2(0.0);
+    float md = 8.0;
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             vec2 g = vec2(x, y);
-            vec2 o = abs(g + 0.1 + 0.8 * vec2(hash2(i + g), hash2(i + g + 17.3)) - f);
-            float d = max(o.x, o.y);
-            if (d < d1) { d2 = d1; d1 = d; best = i + g; }
-            else if (d < d2) d2 = d;
+            vec2 r = g + site(i + g) - f;
+            float d = dot(r, r);
+            if (d < md) { md = d; mr = r; mg = g; }
         }
     }
-    id = hash2(best + 3.1);
-    return d2 - d1;
+    id = hash2(i + mg + 3.1);
+    md = 8.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 g = mg + vec2(x, y);
+            vec2 r = g + site(i + g) - f;
+            if (dot(mr - r, mr - r) > 0.0001) md = min(md, dot(0.5 * (mr + r), normalize(r - mr)));
+        }
+    }
+    return md;
 }
 
 // How far charred bark stands out at block point p, 0 deep in a crack to
@@ -115,7 +123,7 @@ float blocks(vec2 p, out float id) {
 // on top. id says which block.
 float bark(vec2 p, out float id) {
     float edge = blocks(p, id);
-    return smoothstep(0.0, 0.22, edge) * mix(0.6, 1.0, id) + 0.08 * noise(p * 6.0);
+    return smoothstep(0.0, 0.16, edge) * mix(0.6, 1.0, id) + 0.08 * noise(p * 6.0);
 }
 
 // Log from a to b, r thick, over col: charcoal split into raised blocks
@@ -138,7 +146,7 @@ vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken,
     // The blocks, longer along the log than round it, bunched toward its
     // edges as the round surface turns away, and roughly shaped.
     float around = asin(clamp(v, -1.0, 1.0));
-    vec2 bp = vec2(u * 1.5, around * 2.4) + seed * vec2(3.7, 1.3);
+    vec2 bp = vec2(u * 1.6, around * 2.2) + seed * vec2(3.7, 1.3);
     bp += 0.35 * vec2(noise(bp * 1.3), noise(bp * 1.3 + 9.0));
     float id, id2;
     float h = bark(bp, id);
