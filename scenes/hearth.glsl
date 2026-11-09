@@ -14,11 +14,11 @@
 // keeping it low and to the right however wide the window is.
 const float FIRE_RIGHT = 0.62;
 const int SPARKS = 14;
-const float LINES = 300.0;    // the tape's lines, top to bottom
+const float LINES = 480.0;    // the tape's lines, top to bottom, as on NTSC
 const float BLEED = 0.007;    // how far color smears right, in screen heights
-// The camcorder's clock starts at 11:40 PM on December 24, 1989.
+// The camcorder's clock starts at 11:40 PM on December 24, 1988.
 const float CLOCK = 23.0 * 60.0 + 40.0;
-const int YEAR = 1989;
+const int YEAR = 1988;
 
 // For fixed traits: small inputs, so sin() is precise.
 float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
@@ -110,10 +110,11 @@ vec3 burning(vec3 col, vec2 q, vec2 a, vec2 b, float r, float seed, bool broken,
     vec3 wood = mix(vec3(0.035, 0.025, 0.02), vec3(0.13, 0.085, 0.055), bark);
     wood *= 0.45 + 0.55 * sqrt(max(0.0, 1.0 - v * v));
     // Cracks: the ridges of a noise stretched along the log, glowing
-    // where it has burnt through, most of all underneath.
-    float ridge = 1.0 - abs(2.0 * noise(vec2(u * 2.2 + seed, v * 5.0)) - 1.0);
+    // where it has burnt through, most of all underneath, each with a soft
+    // haze of heat around it so it doesn't break up on the tape's lines.
+    float ridge = 1.0 - abs(2.0 * noise(vec2(u * 1.2 + seed, v * 3.5 + 0.4 * u)) - 1.0);
     float burnt = 1.0 - smoothstep(-0.9, 0.5, v) + 0.35 * noise(vec2(u * 0.7 - seed, 3.0));
-    float glow = smoothstep(0.86, 0.98, ridge) * clamp(burnt, 0.0, 1.0);
+    float glow = (0.85 * smoothstep(0.82, 0.97, ridge) + 0.25 * smoothstep(0.6, 0.92, ridge)) * clamp(burnt, 0.0, 1.0);
     glow += 0.35 * (1.0 - smoothstep(-1.0, -0.6, v));  // the coals' glow from below
     glow *= 0.7 + 0.5 * noise(vec2(u * 0.8 + seed, t * 0.9));
     wood += flame(0.3 + 0.4 * glow) * glow * fl;
@@ -147,7 +148,8 @@ float flames(vec2 q, float x, float y0, float w, float tall, float t) {
     return clamp(f, 0.0, 1.0);
 }
 
-// Sparks: specks thrown up off the logs, drifting and winking out.
+// Sparks: specks thrown up off the logs, drifting and winking out, and
+// now and then a big one that pops white-hot and climbs higher.
 vec3 sparks(vec2 q, float x, float t) {
     vec3 col = vec3(0.0);
     for (int i = 0; i < SPARKS; i++) {
@@ -157,12 +159,22 @@ vec3 sparks(vec2 q, float x, float t) {
         float lap = floor(run), age = fract(run);
         if (hash3(vec3(n, lap, 4.0)) < 0.35) continue;  // not every lap
         vec2 o = vec2(x + (hash3(vec3(n, lap, 1.0)) - 0.5) * 0.6, i % 4 == 0 ? 0.08 : 0.25);
-        float rise = mix(0.35, 0.8, hash3(vec3(n, lap, 2.0)));
+        bool big = hash3(vec3(n, lap, 5.0)) > 0.88;
+        float rise = mix(0.35, 0.8, hash3(vec3(n, lap, 2.0))) * (big ? 1.4 : 1.0);
         float sway = (hash3(vec3(n, lap, 3.0)) - 0.5) * 0.25;
         vec2 at = o + vec2(sway * age + 0.02 * sin(age * 9.0 + n), rise * age);
         float d = length(q - at);
         float bright = (1.0 - age) * (1.0 - age) * (0.6 + 0.4 * sin(t * 20.0 + n * 3.0));
-        col += vec3(1.0, 0.6, 0.2) * bright * (1.0 - smoothstep(0.0, 0.004, d) + 0.25 * (1.0 - smoothstep(0.0, 0.015, d)));
+        if (big) {
+            // White-hot as it pops, cooling to orange as it climbs, with a
+            // wide glow and a quick flash at the start.
+            bright = pow(1.0 - age, 0.8) * (0.85 + 0.15 * sin(t * 25.0 + n)) * 2.5;
+            bright += 3.0 * (1.0 - smoothstep(0.0, 0.08, age));
+            vec3 hue = mix(vec3(1.0, 0.55, 0.15), vec3(1.0, 0.95, 0.8), 1.0 - smoothstep(0.0, 0.6, age));
+            col += hue * bright * (1.0 - smoothstep(0.003, 0.008, d) + 0.35 * exp(-d / 0.02));
+        } else {
+            col += vec3(1.0, 0.6, 0.2) * bright * (1.0 - smoothstep(0.0, 0.004, d) + 0.25 * (1.0 - smoothstep(0.0, 0.015, d)));
+        }
     }
     return col;
 }
@@ -268,7 +280,7 @@ float stamp(vec2 q, float aspect, float t) {
     int i = textCell(q, vec2(aspect - 0.06 - 11.0 * cell.x, 0.06 + 2.0 * cell.y), cell, 11, f);
     int g = -1;
     if (i >= 0) {
-        // DEC 24 1989
+        // DEC 24 1988
         int month[4] = int[4](D, E, C, SP);
         if (i < 4) g = month[i];
         else if (i < 6) g = digit(day > 31 ? 1 : day, i - 4, 2);
