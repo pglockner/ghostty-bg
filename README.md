@@ -10,9 +10,12 @@ picker with live color previews, while keeping your text readable.
 
 - **41 gradients**, from deep (`orchid`, `velvet`, `coals`) to vivid
   (`wildfire`, `lagoon`, `prism`), still or animated with `-a`
-- **Three animated scenes:** `jellyfish`, sea nettles drifting up through
-  deep water; `matrix`, slow, muted falling code; and, for light themes,
-  `lake`, tiny boats crossing a calm lake at golden hour, seen from above
+- **Four animated scenes:** `jellyfish`, sea nettles drifting up through
+  deep water; `matrix`, slow, muted falling code; `hearth`, for winter, a
+  fire crackling in a brick fireplace as played off a worn videotape, an
+  homage to the fireplace videos that kept the yule log burning on TV;
+  and, for light themes, `lake`, tiny boats crossing a calm lake at golden
+  hour, seen from above
 - **Your own images**, copied in from any format ImageMagick reads
 - **A picker** (`ghostty-bg -p`) with color swatches and a preview of each
   gradient over your theme; ctrl-t tries one without leaving it
@@ -34,6 +37,8 @@ picker with live color previews, while keeping your text readable.
 ![The matrix scene behind ghostty-bg's help](docs/matrix.png)
 
 ![Boats crossing the lake scene behind a README, on a light theme](docs/lake.png)
+
+![The hearth scene, a videotaped fire, behind a git log](docs/hearth.png)
 
 ## Install
 
