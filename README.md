@@ -9,7 +9,8 @@ picker with live color previews, while keeping your text readable.
 ![Jellyfish rising behind a terminal listing](docs/jellyfish.png)
 
 - **41 gradients**, from deep (`orchid`, `velvet`, `coals`) to vivid
-  (`wildfire`, `lagoon`, `prism`), still or animated with `-a`
+  (`wildfire`, `lagoon`, `prism`), still or, for six pairs, slowly fading
+  into each other and back with `-a`
 - **Four animated scenes:** `jellyfish`, sea nettles drifting up through
   deep water; `matrix`, slow, muted falling code; `hearth`, for winter, a
   fire crackling in a brick fireplace as played off a worn videotape, an
@@ -71,7 +72,7 @@ config-file = ?~/.config/ghostty-bg/ghostty-bg.conf
 | `ghostty-bg -p` | pick one in fzf, then set its opacity and animation |
 | `ghostty-bg orchid` | switch to a gradient, scene or image by name |
 | `ghostty-bg -o 0.4 wildfire` | switch, at an opacity remembered for next time |
-| `ghostty-bg -a lagoon` | switch to a gradient whose colors flow |
+| `ghostty-bg -a reef` | switch to a gradient that slowly fades into its partner (`tropic`) and back |
 | `ghostty-bg ~/Pictures/sky.jpg` | copy an image in and switch to it |
 | `ghostty-bg -r` / `-R` | back to the starting opacity, for one or every background |
 | `ghostty-bg -n` | no background: Ghostty as it is on its own |
@@ -100,6 +101,14 @@ half-transparent, is made more opaque the same way when a gradient needs
 it.
 
 ![wildfire, with the theme's dim colors lifted](docs/wildfire.png)
+
+With `-a`, the shader holds both gradients of a pair and fades from one
+to the other: each shows for 30 seconds, then eases into the other over 15,
+the pair tinted together at the one opacity, and the text fitted to both.
+The pairs (`reef`/`tropic`, `orchid`/`abyss`, `velvet`/`coals`,
+`moss`/`fjord`, `sunset`/`midnight`, `fuchsia`/`harbor`, listed in `FADES`)
+are close enough in hue that their blend stays rich instead of going grey
+halfway.
 
 State lives in `~/.config/ghostty-bg/` (under `$XDG_CONFIG_HOME` if set):
 the config Ghostty includes, `shaders/`, the remembered `opacity` per

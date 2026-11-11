@@ -52,7 +52,7 @@ Linux).
   -p, --pick       choose a background in fzf, which shows each gradient's
                    colors and how it will look over the theme's background,
                    then asks for its opacity (enter keeps it) and, for a
-                   gradient, whether it moves. Needs fzf.
+                   gradient with a partner, whether it fades. Needs fzf.
                    ctrl-s on a gradient saves it as an image instead,
                    like --png. ctrl-t tries the highlighted background
                    without leaving the picker; esc puts back the one that
@@ -62,11 +62,13 @@ Linux).
                    apps that take a background image (atrium, iTerm2).
                    Its colors are at full strength, so use the app's own
                    opacity setting.
-  -a, --animated   make the gradient's colors flow along it, wrapping round
-                   from the last to the first. Not remembered: the next
-                   switch without it is still again, though changing only
-                   the opacity keeps it. Ghostty redraws the focused
-                   terminal continuously while it runs.
+  -a, --animated   fade the gradient slowly into its partner and back, over
+                   and over: each holds for 30 seconds, then eases into the
+                   other over 15, at the named one's opacity. Only some
+                   gradients have a partner; the listing shows which. Not
+                   remembered: the next switch without it is still again,
+                   though changing only the opacity keeps it. Ghostty
+                   redraws the focused terminal continuously while it runs.
 
 Images are kept as NAME.jpg in ~/.config/ghostty-bg/backgrounds/, or in the
 folder $GHOSTTY_BG_IMAGES names (a link to a synced folder works too). FILE
@@ -245,6 +247,23 @@ wildfire  135 #800026 #dc1820 #fd7836 #fec662 #fff3b0 0.25'
 
 preset() { printf '%s\n' "$PRESETS" | awk -v n="$1" '$1 == n'; }
 
+# The gradients -a fades between, two to a line: each slowly fades into the
+# other and back. The pair shares the named one's opacity, so both start at
+# the same one, and they are close enough in hue that the colors stay rich
+# halfway instead of turning grey. Chosen by eye over a dark theme.
+FADES='reef    tropic
+orchid  abyss
+velvet  coals
+moss    fjord
+sunset  midnight
+fuchsia harbor'
+
+# The gradient NAME fades with under -a, or nothing.
+partner() { printf '%s\n' "$FADES" | awk -v n="$1" '$1 == n { print $2 } $2 == n { print $1 }'; }
+
+# Every pair that fades, as "reef and tropic, orchid and abyss, ...".
+pairs() { printf '%s\n' "$FADES" | awk '{ printf "%s%s and %s", (NR > 1 ? ", " : ""), $1, $2 } END { print "" }'; }
+
 # The colors of gradient NAME, one per line.
 colors_of() { preset "$1" | awk '{ for (i = 3; i <= NF; i++) if ($i ~ /^#/) print $i }'; }
 
@@ -369,13 +388,18 @@ gradient_opacities() {
         }'
 }
 
-# A warning when gradient NAME's opacity is past its readable maximum.
+# A warning when gradient NAME's opacity is past its readable maximum: with
+# a PARTNER it fades with, the lower of the two.
 too_strong() {
-    local max
-    max="$(readable_max "$1")"
+    local name=$1 other=${2:-} max what=$1 cmd=$1
+    max="$(readable_max "$name")"
     [ -n "$max" ] || return 0
-    awk -v o="$(opacity_of "$1")" -v m="$max" 'BEGIN { exit !(o > m) }' || return 0
-    echo "Too strong for text to stay readable: $1 is readable up to $max (ghostty-bg -o $max $1, or -r $1 for its default $(default_opacity "$1"))."
+    if [ -n "$other" ]; then
+        max="$(awk -v a="$max" -v b="$(readable_max "$other")" 'BEGIN { print (b + 0 < a + 0 ? b : a) }')"
+        what="$name, fading with $other," cmd="-a $name"
+    fi
+    awk -v o="$(opacity_of "$name")" -v m="$max" 'BEGIN { exit !(o > m) }' || return 0
+    echo "Too strong for text to stay readable: $what is readable up to $max (ghostty-bg -o $max $cmd, or -r $cmd for its default $(default_opacity "$name"))."
 }
 
 # "#2f6bff" as "47 107 255".
@@ -417,45 +441,74 @@ ramp() {
 # and OpenGL (Linux) at the bottom left. The shaders take it from Y_DOWN.
 y_down() { if [ "$(uname)" = Darwin ]; then echo true; else echo false; fi; }
 
-# Ghostty hands a shader the finished screen, text included, so the gradient
-# is added only where a pixel is close to the theme's background color.
-write_shader() {
-    local out=$1 angle=$2 strength=$3 speed=$4 c i=0 sep colors=""
-    shift 4
-    for c in "$@"; do
+# GLSL for gradient NAME: a function giving its color at a point on the
+# screen, 0 to 1 across and down, at its own angle.
+gradient_glsl() {
+    local name=$1 angle n c i=0 sep colors=""
+    angle="$(preset "$name" | awk '{ print $2 }')"
+    n="$(colors_of "$name" | wc -l | tr -d ' ')"
+    for c in $(colors_of "$name"); do
         i=$((i + 1))
         sep=','
-        [ "$i" -lt "$#" ] || sep=' '
-        colors="$colors    $(vec3 "$c")$sep // $c
+        [ "$i" -lt "$n" ] || sep=' '
+        colors="$colors        $(vec3 "$c")$sep // $c
 "
     done
-    cat >"$out" <<GLSL
-// Written by ghostty-bg; edit the presets there, not this file.
-const int N = $#;
-const vec3 COLORS[N] = vec3[N](
-$colors);
-const float ANGLE = $angle.0;     // CSS-style degrees
-const float STRENGTH = $strength;  // how much shows over the background
-const float SPEED = $speed;      // palette cycles per second
-const bool Y_DOWN = $(y_down);    // whether fragCoord's y runs down the screen
+    cat <<GLSL
+vec3 gradient_$name(vec2 p) {
+    const int N = $n;
+    const vec3 COLORS[N] = vec3[N](
+$colors    );
+    // How far along the gradient P is, 0 at the start corner and 1 at the
+    // end, for an angle in CSS-style degrees.
+    float a = radians($angle.0);
+    vec2 dir = vec2(sin(a), -cos(a));
+    float t = dot(p - 0.5, dir) / (abs(dir.x) + abs(dir.y)) + 0.5;
+    float s = clamp(t, 0.0, 1.0) * float(N - 1);
+    int i = min(int(s), N - 2);
+    return mix(COLORS[i], COLORS[i + 1], s - float(i));
+}
 
+GLSL
+}
+
+# Write the shader for gradient NAME at STRENGTH to OUT; with a PARTNER, it
+# fades from NAME into PARTNER and back, over and over. Ghostty hands a
+# shader the finished screen, text included, so the gradient is added only
+# where a pixel is close to the theme's background color.
+write_shader() {
+    local out=$1 strength=$2 name=$3 other=${4:-} grad
+    grad="gradient_$name(p)"
+    [ -z "$other" ] || grad="mix(gradient_$name(p), gradient_$other(p), fade())"
+    {
+        echo "// Written by ghostty-bg; edit the presets there, not this file."
+        echo "const float STRENGTH = $strength;  // how much shows over the background"
+        echo "const bool Y_DOWN = $(y_down);    // whether fragCoord's y runs down the screen"
+        echo
+        gradient_glsl "$name"
+        if [ -n "$other" ]; then
+            gradient_glsl "$other"
+            cat <<'GLSL'
+// How far the first gradient has faded into the second: each holds for HOLD
+// seconds, then eases into the other over FADE. It is as if the second lay
+// under the first, which fades away to show it and then comes back.
+const float HOLD = 30.0;
+const float FADE = 15.0;
+float fade() {
+    float c = mod(iTime, 2.0 * (HOLD + FADE));
+    return smoothstep(HOLD, HOLD + FADE, c) - smoothstep(2.0 * HOLD + FADE, 2.0 * (HOLD + FADE), c);
+}
+
+GLSL
+        fi
+        cat <<GLSL
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
     vec4 term = texture(iChannel0, uv);
 
-    // Position along the gradient, 0 at the start corner and 1 at the end,
-    // with y running down the screen, whichever way Ghostty's runs.
+    // With y running down the screen, whichever way Ghostty's runs.
     vec2 p = Y_DOWN ? uv : vec2(uv.x, 1.0 - uv.y);
-    float a = radians(ANGLE);
-    vec2 dir = vec2(sin(a), -cos(a));
-    float t = dot(p - 0.5, dir) / (abs(dir.x) + abs(dir.y)) + 0.5;
-
-    // The palette is a loop, first to last and back to the first, and the
-    // screen shows all but its last step: first to last when still. Time
-    // slides that window round.
-    float s = fract(t * float(N - 1) / float(N) - iTime * SPEED) * float(N);
-    int i = int(s);
-    vec3 grad = mix(COLORS[i], COLORS[(i + 1) % N], fract(s));
+    vec3 grad = $grad;
 
     // A little noise, under one color step, hides banding.
     grad += (fract(sin(dot(fragCoord, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
@@ -466,6 +519,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     fragColor = vec4(term.rgb + (grad - iBackgroundColor) * STRENGTH * mask, term.a);
 }
 GLSL
+    } >"$out"
 }
 
 said() { report "Background: $1 at $(opacity_of "$1")$2."; }
@@ -560,27 +614,30 @@ deactivate() {
     report "Background: none."
 }
 
-# Write the gradient NAME's shader and point the config at it. The opacity
-# and the animation are in the file's name because Ghostty reloads a shader
-# only when its path changes.
+# Write the gradient NAME's shader and point the config at it: with -a, one
+# fading between NAME and its partner. The text is fitted to both, since
+# every blend between them lies within their colors. The opacity and the
+# animation are in the file's name because Ghostty reloads a shader only
+# when its path changes.
 activate_gradient() {
-    local name=$1 angle file speed=0.0 animation=false note=""
-    angle="$(preset "$name" | awk '{ print $2 }')"
+    local name=$1 other="" file animation=false note=""
+    if [ "$ANIMATED" -eq 1 ]; then
+        other="$(partner "$name")"
+        [ -n "$other" ] || die "$name has no partner to fade with; with -a these fade: $(pairs)"
+        animation=true note=", fading with $other"
+    fi
     [ -z "$OPACITY" ] || remember_opacity "$name" "$OPACITY"
     file="$name-$(opacity_of "$name")"
-    if [ "$ANIMATED" -eq 1 ]; then
-        file="$file-animated" speed=0.025 animation=true note=", animated"
-    fi
+    [ -z "$other" ] || file="$file-animated"
+    write_shader "$(new_shader "$file")" "$(strength "$name")" "$name" "$other"
+    use_shader "$file" "$animation"
     # The colors are words with no spaces, so they split cleanly.
     # shellcheck disable=SC2046
-    write_shader "$(new_shader "$file")" "$angle" "$(strength "$name")" "$speed" $(colors_of "$name")
-    use_shader "$file" "$animation"
+    fit_text "$(opacity_of "$name")" $(colors_of "$name") $(colors_of "$other")
     # shellcheck disable=SC2046
-    fit_text "$(opacity_of "$name")" $(colors_of "$name")
-    # shellcheck disable=SC2046
-    fit_faint "$(opacity_of "$name")" $(colors_of "$name")
+    fit_faint "$(opacity_of "$name")" $(colors_of "$name") $(colors_of "$other")
     said "$name" "$note"
-    too_strong "$name"
+    too_strong "$name" "$other"
     follows_appearance
 }
 
@@ -659,23 +716,26 @@ import() {
 # The base names of the files matching a glob, one per line.
 names() { for f in "$@"; do [ -e "$f" ] && basename "${f%.*}"; done; }
 
-# A HEADING and, under it, the NAMES (one per line) with their opacities,
-# the ACTIVE one starred. An empty section prints nothing.
+# A HEADING and, under it, the NAMES (one per line) with their opacities
+# and, for a gradient that fades with -a, its partner, the ACTIVE one
+# starred. An empty section prints nothing.
 section() {
-    local heading=$1 names=$2 current=$3 name mark
+    local heading=$1 names=$2 current=$3 name mark other
     [ -n "$names" ] || return 0
     printf '%s\n' "$heading"
     printf '%s\n' "$names" | sort | while IFS= read -r name; do
         mark=' '
         [ "$name" != "$current" ] || mark='*'
-        printf '%s %-20s %s\n' "$mark" "$name" "$(opacity_of "$name")"
+        other="$(partner "$name")"
+        [ -z "$other" ] || other="fades with $other"
+        printf '%s %-20s %-5s %s\n' "$mark" "$name" "$(opacity_of "$name")" "$other" | sed 's/ *$//'
     done
 }
 
 list() {
     local current
     current="$(active)"
-    section "Gradients (-a animates them)" "$(printf '%s\n' "$PRESETS" | awk '{ print $1 }')" "$current"
+    section "Gradients (-a fades a pair into each other)" "$(printf '%s\n' "$PRESETS" | awk '{ print $1 }')" "$current"
     echo
     section "Images" "$(names "$DIR"/*.jpg)" "$current"
     echo
@@ -890,6 +950,13 @@ pick_row() {
     printf '%s\t%s %-10s %-5s %s %s\n' "$1" "$mark" "$1" "$(opacity_of "$1")" "$3" "$4"
 }
 
+# ", fades with OTHER" for a gradient that fades with -a, or nothing.
+fades_kind() {
+    local other
+    other="$(partner "$1")"
+    [ -z "$other" ] || printf ', fades with %s' "$other"
+}
+
 # Every background as a picker line: none, then gradients, images and
 # scenes. The none row's name is -n, so trying or choosing it runs
 # `ghostty-bg -n`.
@@ -900,7 +967,7 @@ pick_rows() {
     printf '%s\t%s %-10s %-5s %s %s\n' -n "$mark" none "" "$blank" "no background"
     printf '%s\n' "$PRESETS" | awk '{ print $1 }' | sort | while IFS= read -r name; do
         # shellcheck disable=SC2046
-        pick_row "$name" "$current" "$(bar 16 1 "" 1 $(colors_of "$name"))" gradient
+        pick_row "$name" "$current" "$(bar 16 1 "" 1 $(colors_of "$name"))" "gradient$(fades_kind "$name")"
     done
     names "$DIR"/*.jpg | sort | while IFS= read -r name; do pick_row "$name" "$current" "$blank" image; done
     names "$SCENES"/*.glsl | sort | while IFS= read -r name; do pick_row "$name" "$current" "$blank" scene; done
@@ -909,7 +976,7 @@ pick_rows() {
 # What the picker shows beside the list for background NAME. The picker
 # passes the theme's background in GHOSTTY_BG_THEME.
 preview() {
-    local name=$1 width=${FZF_PREVIEW_COLUMNS:-40} bg=${GHOSTTY_BG_THEME:-}
+    local name=$1 width=${FZF_PREVIEW_COLUMNS:-40} bg=${GHOSTTY_BG_THEME:-} other
     if [ "$name" = -n ]; then
         echo "none: no background, Ghostty's own config as it is without ghostty-bg"
     elif [ -e "$DIR/$name.jpg" ]; then
@@ -938,6 +1005,13 @@ preview() {
         bar "$width" 2 "" 1 $(colors_of "$name")
         echo
         colors_of "$name" | paste -sd ' ' -
+        other="$(partner "$name")"
+        if [ -n "$other" ]; then
+            echo
+            echo "With -a it fades into $other and back:"
+            # shellcheck disable=SC2046
+            bar "$width" 2 "" 1 $(colors_of "$other")
+        fi
     fi
 }
 
@@ -988,7 +1062,7 @@ pick() {
         --layout reverse --height 80% --border --border-label ' ghostty-bg ' \
         --prompt 'background> ' \
         --header $'enter switch · ctrl-s PNG · esc cancel\n↑↓ move · ctrl-t try · type to search' \
-        --footer $'then opacity: enter keeps · d default\ngradients: animate y/N · ctrl-c cancel' \
+        --footer $'then opacity: enter keeps · d default\npairs: fade y/N · ctrl-c cancel' \
         --footer-border line \
         --expect ctrl-s --bind "load:pos(${pos:-1})" \
         --bind "ctrl-t:execute-silent('$REPO/bin/ghostty-bg' {1})" \
@@ -1018,8 +1092,8 @@ pick() {
     # Only a changed opacity is remembered, so a gradient keeps following
     # its own starting opacity until it is given another.
     [ "$value" = "$(opacity_of "$name")" ] || OPACITY=$value
-    if [ -n "$(preset "$name")" ]; then
-        read -r -p "Animate $name? Ghostty redraws continuously while it moves. [y/N]: " answer || cancelled
+    if [ -n "$(partner "$name")" ]; then
+        read -r -p "Fade $name into $(partner "$name") and back? Ghostty redraws continuously while it fades. [y/N]: " answer || cancelled
         case "$answer" in [yY]*) ANIMATED=1 ;; esac
     fi
     trap - INT

@@ -41,7 +41,7 @@ has() { grep -q -- "$2" "$1"; }   # FILE PATTERN
 lacks() { ! grep -q -- "$2" "$1"; }
 fails() { ! "$@"; }
 says() { bg "$1" | grep -q -- "$2"; }   # NAME TEXT: switching to NAME prints TEXT
-previews() { bg --preview "$1" | grep -q -- "$2"; }   # NAME TEXT
+previews() { bg --preview "$1" | grep -- "$2" >/dev/null; }   # NAME TEXT (grep -q would cut the pipe short)
 warns() { bg "$@" | grep -q 'readable up to'; }   # ARGS: switching warns it's too strong
 light() { GHOSTTY_BG_THEME_NAME='Atom One Light' "$@"; }   # COMMAND...: run it over a light theme
 pair() { GHOSTTY_BG_THEME_NAME='light:Atom One Light,dark:Fish Tank' "$@"; }   # COMMAND...: over one that follows the appearance
@@ -117,9 +117,13 @@ check "a gradient starts at its preset's opacity" test -e "$shaders/orchid-0.7.g
 check "a gradient is told which way y runs here" has "$shaders/orchid-0.7.glsl" "^const bool Y_DOWN = $ydown;"
 check "a still gradient isn't animated" has "$conf" '^custom-shader-animation = false$'
 
-bg -a thermal >/dev/null
-check "a five-color preset gives a five-color shader" has "$shaders/thermal-0.3-animated.glsl" '^const int N = 5;$'
-glsl "an animated five-color shader compiles"
+bg -a reef >/dev/null
+check "a five-color preset gives a five-color shader" has "$shaders/reef-0.3-animated.glsl" '^    const int N = 5;$'
+check "-a fades a gradient into its partner" has "$shaders/reef-0.3-animated.glsl" 'mix(gradient_reef(p), gradient_tropic(p), fade())'
+check "a fading gradient is animated" has "$conf" '^custom-shader-animation = true$'
+glsl "a fading shader compiles"
+check "-a on a gradient with no partner fails" fails bg -a thermal
+check "the listing shows a gradient's partner" bash -c 'bin/ghostty-bg | grep -q "^  orchid .*fades with abyss$"'
 
 bg -a sunset >/dev/null
 bg -o 0.4 >/dev/null
