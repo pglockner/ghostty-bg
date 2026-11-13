@@ -91,6 +91,14 @@ only the pixels close to the theme's background color and leave text alone.
 Each switch rewrites `~/.config/ghostty-bg/ghostty-bg.conf`, which names the
 shader or image, and signals Ghostty to reload.
 
+Where Ghostty blends linearly, as it does by default everywhere but macOS
+(its `alpha-blending` setting), it hands a shader the screen in linear
+light but its colors, `iBackgroundColor` among them, as stored. The
+shaders turn the screen back to stored colors before comparing and
+blending, and their result back to linear light, so they work the same on
+Linux as on macOS. ghostty-bg reads `alpha-blending` when it writes a
+shader; switch again after changing it.
+
 Over a bright gradient that isn't enough to keep dim text readable, so
 ghostty-bg also writes lighter versions of the theme's dim palette colors
 into that file, worked out from the gradient's colors and opacity. Deep
@@ -120,13 +128,17 @@ elsewhere or sync them between machines.
 
 A scene is a GLSL file in `scenes/` that defines `mainImage`, the way
 [Shadertoy](https://www.shadertoy.com) shaders do. ghostty-bg puts
-`const float STRENGTH` (the opacity) and `const bool Y_DOWN` in front of
-it; use `STRENGTH` and `iBackgroundColor` to tint only the background, as
-`scenes/matrix.glsl` does. Ghostty's `fragCoord.y` runs down the screen on
-macOS (Metal) and up it on Linux (OpenGL), so the scenes take their own
-sense of up from `Y_DOWN` rather than from `fragCoord`. A line `// ghostty-bg starts this scene at opacity N.` starts it
-somewhere other than 0.25, as `scenes/lake.glsl` does. `scripts/test.sh` lints ghostty-bg, runs it against a throwaway
-config folder, and compiles the shaders if `glslangValidator` is installed.
+`const float STRENGTH` (the opacity), `const bool Y_DOWN`, and
+`screen_at` and `to_screen` in front of it. Read the screen with
+`screen_at(uv)` rather than `texture(iChannel0, uv)`, hand the color back
+through `to_screen`, and use `STRENGTH` and `iBackgroundColor` to tint only
+the background, as `scenes/matrix.glsl` does. Ghostty's `fragCoord.y` runs
+down the screen on macOS (Metal) and up it on Linux (OpenGL), so the scenes
+take their own sense of up from `Y_DOWN` rather than from `fragCoord`. A
+line `// ghostty-bg starts this scene at opacity N.` starts it somewhere
+other than 0.25, as `scenes/lake.glsl` does. `scripts/test.sh` lints
+ghostty-bg, runs it against a throwaway config folder, and compiles the
+shaders if `glslangValidator` is installed.
 
 ## Credits
 

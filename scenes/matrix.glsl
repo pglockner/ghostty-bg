@@ -1,7 +1,8 @@
 // Slow, muted Matrix code: strings of mirrored katakana dropping down the
 // screen, each led by a pale head and fading behind it. ghostty-bg puts
-// `const float STRENGTH` (the opacity) and `const bool Y_DOWN` (whether
-// fragCoord's y runs down the screen) in front of this file.
+// `const float STRENGTH` (the opacity), `const bool Y_DOWN` (whether
+// fragCoord's y runs down the screen), and screen_at and to_screen (the
+// screen's colors as stored, and back) in front of this file.
 
 const vec2 CELL = vec2(21.0, 27.0);  // pixels per character
 const float SPEED = 1.0;             // cells per second, roughly
@@ -76,7 +77,7 @@ float glyph(int g, vec2 p) {
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
-    vec4 term = texture(iChannel0, uv);
+    vec4 term = screen_at(uv);
 
     // Pixels with y running down the screen, the way the code falls,
     // whichever way Ghostty's y runs.
@@ -109,5 +110,5 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float mask = 1.0 - smoothstep(0.02, 0.2, distance(term.rgb, iBackgroundColor));
 
     vec3 base = mix(term.rgb, BACKDROP, DARKEN * mask);
-    fragColor = vec4(base + code * STRENGTH * mask, term.a);
+    fragColor = vec4(to_screen(base + code * STRENGTH * mask), term.a);
 }

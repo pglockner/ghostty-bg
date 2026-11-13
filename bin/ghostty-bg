@@ -92,12 +92,13 @@ scene, which is made for light ones.
 
 A scene is a shader kept as scenes/NAME.glsl in ghostty-bg's own folder,
 NAME in lowercase letters. It is copied in with `const float STRENGTH` (the
-opacity) and `const bool Y_DOWN` (whether fragCoord's y runs down the
-screen: it does on macOS, not on Linux) put in front, and is always
-animated. To add one, add a file there that defines mainImage and uses
-STRENGTH, Y_DOWN and iBackgroundColor the way the others do, with a line
-"// ghostty-bg starts this scene at opacity N." to start it somewhere other
-than 0.25.
+opacity), `const bool Y_DOWN` (whether fragCoord's y runs down the
+screen: it does on macOS, not on Linux), and screen_at and to_screen put
+in front, and is always animated. To add one, add a file there that
+defines mainImage, reads the screen with screen_at, hands back its color
+through to_screen, and uses STRENGTH, Y_DOWN and iBackgroundColor the way
+the others do, with a line "// ghostty-bg starts this scene at opacity N."
+to start it somewhere other than 0.25.
 USAGE
 }
 
@@ -441,6 +442,47 @@ ramp() {
 # and OpenGL (Linux) at the bottom left. The shaders take it from Y_DOWN.
 y_down() { if [ "$(uname)" = Darwin ]; then echo true; else echo false; fi; }
 
+# Whether Ghostty hands a shader the screen in linear light, and takes its
+# color back in it: it does when it blends linearly, as it does by default
+# everywhere but macOS. Its colors, iBackgroundColor among them, come as
+# stored (sRGB) either way. The shaders take it from LINEAR.
+linear() {
+    local g blending=""
+    g="$(ghostty_bin)"
+    [ -z "$g" ] || blending="$("$g" +show-config 2>/dev/null | awk -F ' *= *' '$1 == "alpha-blending" { print $2; exit }')"
+    if [ -z "$blending" ]; then
+        if [ "$(uname)" = Darwin ]; then blending=native; else blending=linear-corrected; fi
+    fi
+    if [ "$blending" = native ]; then echo false; else echo true; fi
+}
+
+# GLSL put in front of every shader: which way y runs, whether the screen is
+# in linear light, and screen_at and to_screen, which turn the screen to
+# stored colors and back. A shader thus compares the screen with Ghostty's
+# colors, and blends over it, in stored colors, the way the text colors are
+# worked out.
+screen_glsl() {
+    cat <<GLSL
+const bool Y_DOWN = $(y_down);  // whether fragCoord's y runs down the screen
+const bool LINEAR = $(linear);  // whether the screen comes and goes in linear light
+
+// The screen at UV, its color as stored.
+vec4 screen_at(vec2 uv) {
+    vec4 c = texture(iChannel0, uv);
+    if (LINEAR) c.rgb = mix(c.rgb * 12.92, 1.055 * pow(c.rgb, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c.rgb));
+    return c;
+}
+
+// A stored color C as the screen takes it. Clamped first, since pow is
+// undefined below 0.
+vec3 to_screen(vec3 c) {
+    c = clamp(c, 0.0, 1.0);
+    return LINEAR ? mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)) : c;
+}
+
+GLSL
+}
+
 # GLSL for gradient NAME: a function giving its color at a point on the
 # screen, 0 to 1 across and down, at its own angle.
 gradient_glsl() {
@@ -483,8 +525,7 @@ write_shader() {
     {
         echo "// Written by ghostty-bg; edit the presets there, not this file."
         echo "const float STRENGTH = $strength;  // how much shows over the background"
-        echo "const bool Y_DOWN = $(y_down);    // whether fragCoord's y runs down the screen"
-        echo
+        screen_glsl
         gradient_glsl "$name"
         if [ -n "$other" ]; then
             gradient_glsl "$other"
@@ -504,7 +545,7 @@ GLSL
         cat <<GLSL
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
-    vec4 term = texture(iChannel0, uv);
+    vec4 term = screen_at(uv);
 
     // With y running down the screen, whichever way Ghostty's runs.
     vec2 p = Y_DOWN ? uv : vec2(uv.x, 1.0 - uv.y);
@@ -516,7 +557,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // 1 on the background, fading to 0 as the pixel moves away from it.
     float mask = 1.0 - smoothstep(0.02, 0.2, distance(term.rgb, iBackgroundColor));
 
-    fragColor = vec4(term.rgb + (grad - iBackgroundColor) * STRENGTH * mask, term.a);
+    fragColor = vec4(to_screen(term.rgb + (grad - iBackgroundColor) * STRENGTH * mask), term.a);
 }
 GLSL
     } >"$out"
@@ -649,8 +690,9 @@ follows_appearance() {
     [ -z "$side" ] || echo "Text colors fit your theme's $side side; switch ghostty-bg again after the system appearance changes."
 }
 
-# Copy the scene NAME's shader in, with its strength and which way y runs
-# put in front. A scene always moves, so it is always animated.
+# Copy the scene NAME's shader in, with its strength, which way y runs and
+# the screen's colors put in front. A scene always moves, so it is always
+# animated.
 activate_scene() {
     local name=$1 file
     [ -z "$OPACITY" ] || remember_opacity "$name" "$OPACITY"
@@ -658,7 +700,7 @@ activate_scene() {
     {
         echo "// Written by ghostty-bg from its scenes/$name.glsl; edit that, not this file."
         echo "const float STRENGTH = $(strength "$name");"
-        echo "const bool Y_DOWN = $(y_down);  // whether fragCoord's y runs down the screen"
+        screen_glsl
         cat "$SCENES/$name.glsl"
     } >"$(new_shader "$file")"
     use_shader "$file" true
