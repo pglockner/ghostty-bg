@@ -6,8 +6,9 @@
 // on the sooty bricks, seen through soft scanlines, bleeding color,
 // wavering tracking and tape grain, with a camcorder's date stamp in the
 // corner and PLAY on screen as it starts. For the long nights of winter.
-// ghostty-bg puts `const float STRENGTH` (the opacity) and `const bool
-// Y_DOWN` (whether fragCoord's y runs down the screen) in front of this
+// ghostty-bg puts `const float STRENGTH` (the opacity), `const bool
+// Y_DOWN` (whether fragCoord's y runs down the screen), and screen_at and
+// to_screen (the screen's colors as stored, and back) in front of this
 // file.
 
 // ghostty-bg starts this scene at opacity 0.4.
@@ -522,7 +523,7 @@ vec3 tape(vec2 q, float aspect, float t) {
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
-    vec4 term = texture(iChannel0, uv);
+    vec4 term = screen_at(uv);
 
     // q runs up from the bottom, in screen heights, whichever way
     // Ghostty's y runs.
@@ -534,5 +535,5 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // 1 on the background, fading to 0 as the pixel moves away from it.
     float mask = 1.0 - smoothstep(0.02, 0.2, distance(term.rgb, iBackgroundColor));
 
-    fragColor = vec4(term.rgb + (pic - iBackgroundColor) * STRENGTH * mask, term.a);
+    fragColor = vec4(to_screen(term.rgb + (pic - iBackgroundColor) * STRENGTH * mask), term.a);
 }

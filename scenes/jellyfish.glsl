@@ -1,8 +1,9 @@
 // Sea nettles swimming slowly upward through deep blue water: lit, striped
 // 3D bells trailing frilled oral arms and fine tentacles, with light
 // rippling over them and specks drifting down. ghostty-bg puts
-// `const float STRENGTH` (the opacity) and `const bool Y_DOWN` (whether
-// fragCoord's y runs down the screen) in front of this file.
+// `const float STRENGTH` (the opacity), `const bool Y_DOWN` (whether
+// fragCoord's y runs down the screen), and screen_at and to_screen (the
+// screen's colors as stored, and back) in front of this file.
 
 const int JELLIES = 10;
 const float SPEED = 0.010;                    // screen heights per second, roughly
@@ -189,7 +190,7 @@ vec3 jelly(vec3 sea, vec2 q, float aspect, int i) {
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
-    vec4 term = texture(iChannel0, uv);
+    vec4 term = screen_at(uv);
 
     // q runs up from the bottom, in screen heights, whichever way
     // Ghostty's y runs.
@@ -202,5 +203,5 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // 1 on the background, fading to 0 as the pixel moves away from it.
     float mask = 1.0 - smoothstep(0.02, 0.2, distance(term.rgb, iBackgroundColor));
 
-    fragColor = vec4(term.rgb + (sea - iBackgroundColor) * STRENGTH * mask, term.a);
+    fragColor = vec4(to_screen(term.rgb + (sea - iBackgroundColor) * STRENGTH * mask), term.a);
 }

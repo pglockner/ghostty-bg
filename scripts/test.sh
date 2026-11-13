@@ -92,6 +92,9 @@ compiles() {
 
 # Which way fragCoord's y runs on this machine: down under Metal, up under OpenGL.
 if [ "$(uname)" = Darwin ]; then ydown=true; else ydown=false; fi
+# Whether Ghostty hands shaders the screen in linear light, at its default
+# alpha-blending: native on macOS, linear-corrected elsewhere.
+if [ "$(uname)" = Darwin ]; then linear=false; else linear=true; fi
 
 failed=0
 # check DESCRIPTION COMMAND...: run COMMAND quietly and report whether it held.
@@ -115,6 +118,18 @@ check "every gradient runs to its brighter end at the bottom right" bright_corne
 bg orchid >/dev/null
 check "a gradient starts at its preset's opacity" test -e "$shaders/orchid-0.7.glsl"
 check "a gradient is told which way y runs here" has "$shaders/orchid-0.7.glsl" "^const bool Y_DOWN = $ydown;"
+check "a gradient is told whether the screen is in linear light" has "$shaders/orchid-0.7.glsl" "^const bool LINEAR = $linear;"
+glsl "a still gradient compiles"
+# Ghostty reads the throwaway config folder's alpha-blending, except on
+# macOS, where it always reads the user's own.
+if command -v ghostty >/dev/null 2>&1 && [ "$(uname)" != Darwin ]; then
+    echo 'alpha-blending = native' >"$XDG_CONFIG_HOME/ghostty/config"
+    bg velvet >/dev/null
+    check "native alpha-blending leaves the screen as stored" has "$shaders/velvet-0.7.glsl" '^const bool LINEAR = false;'
+    rm "$XDG_CONFIG_HOME/ghostty/config"
+else
+    echo "skip  alpha-blending from Ghostty's config (no Ghostty, or macOS)"
+fi
 check "a still gradient isn't animated" has "$conf" '^custom-shader-animation = false$'
 
 bg -a reef >/dev/null
@@ -153,6 +168,7 @@ bg jellyfish >/dev/null
 check "leaving an image drops its opacity line" lacks "$conf" '^background-image'
 check "a scene gets its strength put in front" has "$shaders/jellyfish-0.25.glsl" '^const float STRENGTH = 0.250;$'
 check "a scene is told which way y runs here" has "$shaders/jellyfish-0.25.glsl" "^const bool Y_DOWN = $ydown;"
+check "a scene is told whether the screen is in linear light" has "$shaders/jellyfish-0.25.glsl" "^const bool LINEAR = $linear;"
 check "a scene is animated" has "$conf" '^custom-shader-animation = true$'
 glsl "a scene compiles"
 bg lake >/dev/null
