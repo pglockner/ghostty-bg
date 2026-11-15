@@ -177,6 +177,8 @@ glsl "the lake scene compiles"
 bg hearth >/dev/null
 check "the hearth scene starts at the opacity its file gives" test -e "$shaders/hearth-0.4.glsl"
 glsl "the hearth scene compiles"
+bg matrix >/dev/null
+glsl "the matrix scene compiles"
 
 bg glacier >/dev/null
 check "a pale gradient lifts the dim palette colors" has "$conf" '^palette = 4=#'
