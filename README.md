@@ -43,9 +43,9 @@ picker with live color previews, while keeping your text readable.
 
 ## Install
 
-Needs Ghostty and bash (3.2 or later, so macOS's own works). fzf is needed
-for the picker, and ImageMagick for importing images and `--png`;
-everything else works without them.
+Needs Ghostty and bash (3.2 or later, so macOS's own works). fzf 0.63 or
+later is needed for the picker, and ImageMagick for importing images and
+`--png`; everything else works without them.
 
 ```sh
 git clone https://github.com/pglockner/ghostty-bg.git ~/projects/ghostty-bg
@@ -53,9 +53,9 @@ git clone https://github.com/pglockner/ghostty-bg.git ~/projects/ghostty-bg
 ```
 
 The script installs fzf and ImageMagick if they're missing, with Homebrew,
-pacman, apt, dnf, zypper or apk, whichever it finds; links `ghostty-bg` into
-`~/.local/bin`; and checks Ghostty's config for the line below. It's safe to
-run again.
+pacman, apt, dnf, zypper or apk, whichever it finds, and says so if that fzf
+is too old for the picker; links `ghostty-bg` into `~/.local/bin`; and checks
+Ghostty's config for the line below. It's safe to run again.
 
 Then add this line to Ghostty's config file (cmd-, opens it on macOS,
 ctrl-, on Linux); the `?` lets Ghostty start before the file exists:

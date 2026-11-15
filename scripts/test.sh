@@ -238,6 +238,18 @@ check "an opacity over 1 fails" fails bg -o 2 orchid
 check "the picker previews a gradient's colors" previews orchid '#6a1b6e #3b1f8a #0d4a8a'
 check "the picker previews a scene's description" previews jellyfish 'Sea nettles'
 check "a scene's preview leaves out the copying note" fails previews jellyfish 'ghostty-bg puts'
+# A stand-in for an fzf too old for the picker, as Ubuntu 24.04's is: it
+# gives its version and knows none of the picker's options.
+mkdir -p "$work/oldfzf"
+printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then echo "0.44.1 (stand-in)"; else echo "unknown option: $1" >&2; exit 2; fi' >"$work/oldfzf/fzf"
+chmod +x "$work/oldfzf/fzf"
+# With it first on the PATH, -p fails and names the version it needs.
+old_fzf_refused() {
+    local said
+    if said="$(PATH="$work/oldfzf:$PATH" bin/ghostty-bg -p 2>&1 </dev/null)"; then return 1; fi
+    printf '%s\n' "$said" | grep -q 'fzf 0\.63'
+}
+check "the picker refuses an fzf too old for it, and says which it needs" old_fzf_refused
 
 if [ "$failed" -gt 0 ]; then
     echo "$failed failed"

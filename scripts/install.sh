@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs ghostty-bg from this checkout: installs fzf and ImageMagick with
-# the system's package manager if they're missing, links bin/ghostty-bg into
-# ~/.local/bin, and says what to add to Ghostty's config. Safe to run again.
+# the system's package manager if they're missing, says so if that fzf is too
+# old for the picker, links bin/ghostty-bg into ~/.local/bin, and says what
+# to add to Ghostty's config. Safe to run again.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -37,6 +38,9 @@ if [ ${#missing[@]} -gt 0 ]; then
         "${cmd[@]}" "${missing[@]}"
     fi
 fi
+# Some package managers have only an fzf too old for the picker. ghostty-bg
+# says which it needs; nothing newer is fetched from elsewhere.
+bin/ghostty-bg --has picker || echo "Everything but the picker (ghostty-bg -p) works without it."
 
 bin="$HOME/.local/bin"
 mkdir -p "$bin"
