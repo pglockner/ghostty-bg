@@ -283,17 +283,14 @@ shown() {
 # sed -i takes different arguments on macOS and Linux.
 edit_conf() { sed "$1" "$CONF" >"$CONF.tmp" && mv "$CONF.tmp" "$CONF"; }
 
-# Set KEY = VALUE in the config, replacing its line or adding one.
-set_conf() {
-    local key=$1 value=$2
-    if grep -q "^$key = " "$CONF"; then
-        edit_conf "s|^$key = .*|$key = $value|"
-    else
-        printf '%s = %s\n' "$key" "$value" >>"$CONF"
-    fi
-}
-
 unset_conf() { edit_conf "/^$1 = /d"; }
+
+# Set KEY = VALUE in the config: its old line goes and a new one is added,
+# so the value is written as it is, whatever characters a path has in it.
+set_conf() {
+    unset_conf "$1"
+    printf '%s = %s\n' "$1" "$2" >>"$CONF"
+}
 
 # The name of the background the config points at, if it is one of ours. A
 # shader's file is GRADIENT-OPACITY[-animated].glsl.
@@ -302,23 +299,32 @@ active() {
         -e 's|^background-image = .*/\(.*\)\.jpg$|\1|p' "$CONF" | head -n 1
 }
 
+# The remembered opacities' lines: NAME's own (WHICH is "of") or all the
+# others ("but"). A line is a name, a space and its opacity, and an image's
+# name may have spaces in it, so the opacity is whatever follows the last one.
+opacity_lines() {
+    awk -v which="$1" -v n="$2" '{ name = $0; sub(/ [^ ]*$/, "", name) }
+        (name == n) == (which == "of")' "$OPACITIES" 2>/dev/null || true
+}
+
 opacity_of() {
     local found
-    found="$(awk -v n="$1" '$1 == n { print $2 }' "$OPACITIES" 2>/dev/null || true)"
+    found="$(opacity_lines of "$1")"
+    found="${found##* }"
     [ -n "$found" ] || found="$(default_opacity "$1")"
     printf '%s' "$found"
 }
 
 remember_opacity() {
     local name=$1 value=$2 rest
-    rest="$(awk -v n="$name" '$1 != n' "$OPACITIES" 2>/dev/null || true)"
+    rest="$(opacity_lines but "$name")"
     printf '%s\n' "$rest" "$name $value" | sed '/^$/d' | sort >"$OPACITIES"
 }
 
 # Drop NAME's remembered opacity, so it goes back to its starting one.
 forget_opacity() {
     local rest
-    rest="$(awk -v n="$1" '$1 != n' "$OPACITIES" 2>/dev/null || true)"
+    rest="$(opacity_lines but "$1")"
     printf '%s\n' "$rest" | sed '/^$/d' >"$OPACITIES"
 }
 

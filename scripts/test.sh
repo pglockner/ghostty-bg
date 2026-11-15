@@ -159,10 +159,13 @@ bg sample >/dev/null
 check "an image clears the shader" empty "$shaders"
 check "an image drops the shader lines" lacks "$conf" '^custom-shader'
 check "an image is named in the config" has "$conf" '^background-image = .*/sample.jpg$'
-mkdir -p "$work/elsewhere"
-im -size 64x40 gradient:black-maroon "$work/elsewhere/other.jpg"
-GHOSTTY_BG_IMAGES="$work/elsewhere" bg other >/dev/null
-check "GHOSTTY_BG_IMAGES points at another image folder" has "$conf" "^background-image = .*/elsewhere/other.jpg$"
+mkdir -p "$work/else & where"
+im -size 64x40 gradient:black-maroon "$work/else & where/other.jpg"
+GHOSTTY_BG_IMAGES="$work/else & where" bg other >/dev/null
+check "GHOSTTY_BG_IMAGES points at another image folder, even one with & in its path" has "$conf" "^background-image = $work/else & where/other.jpg$"
+cp "$state/backgrounds/sample.jpg" "$state/backgrounds/two words.jpg"
+bg -o 0.6 'two words' >/dev/null
+check "an image with a space in its name keeps its opacity" has "$conf" '^background-image-opacity = 0.6$'
 
 bg jellyfish >/dev/null
 check "leaving an image drops its opacity line" lacks "$conf" '^background-image'
