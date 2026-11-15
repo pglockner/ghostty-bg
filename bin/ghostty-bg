@@ -1176,10 +1176,12 @@ pick() {
 }
 
 # scripts/install.sh asks what is in place as `ghostty-bg --has WHAT`:
-# picker, whether the picker can run here (if not, it says why).
+# picker, whether the picker can run here (if not, it says why), or
+# include, whether Ghostty's config includes ghostty-bg.conf.
 if [ "${1:-}" = "--has" ]; then
     case "${2:-}" in
         picker) need_fzf ;;
+        include) in_use || exit 1 ;;
         *) exit 2 ;;
     esac
     exit 0

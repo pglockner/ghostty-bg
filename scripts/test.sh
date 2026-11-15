@@ -251,6 +251,17 @@ old_fzf_refused() {
 }
 check "the picker refuses an fzf too old for it, and says which it needs" old_fzf_refused
 
+# A stand-in Ghostty whose config, wherever it keeps it, includes the
+# throwaway ghostty-bg.conf, and a stand-in fzf new enough for the picker,
+# so scripts/install.sh finds nothing to install. The Ghostty answers only
+# +show-config: with a version too, a switch would signal a real Ghostty.
+mkdir -p "$work/installed"
+printf '%s\n' '#!/bin/sh' "[ \"\$1\" != +show-config ] || echo 'config-file = ?$conf'" >"$work/installed/ghostty"
+printf '%s\n' '#!/bin/sh' 'echo "0.63.0 (stand-in)"' >"$work/installed/fzf"
+chmod +x "$work/installed/ghostty" "$work/installed/fzf"
+installs() { PATH="$work/installed:$PATH" scripts/install.sh | grep -- "$1" >/dev/null; }   # TEXT: install.sh prints TEXT
+check "install.sh asks Ghostty whether its config includes ghostty-bg" installs 'already includes'
+
 if [ "$failed" -gt 0 ]; then
     echo "$failed failed"
     exit 1

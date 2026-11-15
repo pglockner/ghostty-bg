@@ -54,11 +54,11 @@ esac
 command -v ghostty >/dev/null 2>&1 || [ -d /Applications/Ghostty.app ] ||
     echo "Ghostty isn't installed; ghostty-bg needs it."
 
-line='config-file = ?~/.config/ghostty-bg/ghostty-bg.conf'
-conf="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/config"
-if grep -qsF -- "$line" "$conf"; then
+# Ghostty keeps its config in more than one place, so ghostty-bg asks
+# Ghostty itself whether it includes ghostty-bg.conf.
+if bin/ghostty-bg --has include; then
     echo "Ghostty's config already includes ghostty-bg."
 else
-    echo "Add this line to Ghostty's config ($conf):"
-    echo "  $line"
+    echo "Add this line to Ghostty's config (cmd-, opens it on macOS, ctrl-, on Linux):"
+    echo "  config-file = ?~/.config/ghostty-bg/ghostty-bg.conf"
 fi
