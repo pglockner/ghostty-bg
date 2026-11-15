@@ -43,9 +43,10 @@ picker with live color previews, while keeping your text readable.
 
 ## Install
 
-Needs Ghostty and bash (3.2 or later, so macOS's own works). fzf 0.63 or
-later is needed for the picker, and ImageMagick for importing images and
-`--png`; everything else works without them.
+Needs Ghostty, 1.3 or later for gradients and scenes (images work from
+1.2), and bash (3.2 or later, so macOS's own works). fzf 0.63 or later is
+needed for the picker, and ImageMagick for importing images and `--png`;
+everything else works without them.
 
 ```sh
 git clone https://github.com/pglockner/ghostty-bg.git ~/projects/ghostty-bg
