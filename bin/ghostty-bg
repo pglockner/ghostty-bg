@@ -40,9 +40,9 @@ leaves them out without a word. Images work from 1.2.
                    opacity; one that was never given an opacity starts at
                    its gradient's or scene's own, if it has one, or else
                    0.25, and a gradient no higher than text stays
-                   readable over the theme. A
-                   gradient set past the opacity at which text can stay
-                   readable says so, and how far it can go.
+                   readable over the theme. A gradient set past the
+                   opacity at which text can stay readable says so, and
+                   how far it can go.
   -r, --reset      forget the opacity remembered for NAME (or the active
                    background) and switch to it at its starting opacity.
   -R, --reset-all  forget every remembered opacity, and put the active
@@ -66,7 +66,8 @@ leaves them out without a word. Images work from 1.2.
   -a, --animated   fade the gradient slowly into its partner and back, over
                    and over: each holds for 30 seconds, then eases into the
                    other over 15, at the named one's opacity. Only some
-                   gradients have a partner; the listing shows which. Not
+                   gradients have a partner; the listing shows which. A
+                   scene is always animated, with or without -a. Not
                    remembered: the next switch without it is still again,
                    though changing only the opacity keeps it. Ghostty
                    redraws the focused terminal continuously while it runs.
@@ -94,8 +95,9 @@ scene, which is made for light ones.
 A scene is a shader kept as scenes/NAME.glsl in ghostty-bg's own folder,
 NAME in lowercase letters. It is copied in with `const float STRENGTH` (the
 opacity), `const bool Y_DOWN` (whether fragCoord's y runs down the
-screen: it does on macOS, not on Linux), and screen_at and to_screen put
-in front, and is always animated. To add one, add a file there that
+screen: it does on macOS, not on Linux), `const bool LINEAR` (whether the
+screen comes in linear light), and screen_at and to_screen, which allow
+for it, put in front, and is always animated. To add one, add a file that
 defines mainImage, reads the screen with screen_at, hands back its color
 through to_screen, and uses STRENGTH, Y_DOWN and iBackgroundColor the way
 the others do, with a line "// ghostty-bg starts this scene at opacity N."

@@ -129,8 +129,9 @@ elsewhere or sync them between machines.
 
 A scene is a GLSL file in `scenes/` that defines `mainImage`, the way
 [Shadertoy](https://www.shadertoy.com) shaders do. ghostty-bg puts
-`const float STRENGTH` (the opacity), `const bool Y_DOWN`, and
-`screen_at` and `to_screen` in front of it. Read the screen with
+`const float STRENGTH` (the opacity), `const bool Y_DOWN`, `const bool
+LINEAR` (whether the screen comes in linear light), and `screen_at` and
+`to_screen`, which allow for it, in front of it. Read the screen with
 `screen_at(uv)` rather than `texture(iChannel0, uv)`, hand the color back
 through `to_screen`, and use `STRENGTH` and `iBackgroundColor` to tint only
 the background, as `scenes/matrix.glsl` does. Ghostty's `fragCoord.y` runs
