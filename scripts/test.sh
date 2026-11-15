@@ -250,6 +250,27 @@ old_fzf_refused() {
     printf '%s\n' "$said" | grep -q 'fzf 0\.63'
 }
 check "the picker refuses an fzf too old for it, and says which it needs" old_fzf_refused
+# The picker's search, without a keyboard: a stand-in fzf that hands the
+# picker's own rows and options to the real one with --filter, once for each
+# word of $PICK_QUERIES, saves the row ranked first for each, and cancels.
+# That is the ranking only: which row is highlighted is fzf's doing as keys
+# are typed, which --filter doesn't run.
+if bin/ghostty-bg --has picker 2>/dev/null; then
+    mkdir -p "$work/filter"
+    printf '%s\n' '#!/bin/sh' "[ \"\$1\" != --version ] || exec '$(command -v fzf)' --version" "cat >'$work/rows'" \
+        "for q in \$PICK_QUERIES; do '$(command -v fzf)' \"\$@\" --filter \"\$q\" <'$work/rows' | head -n 1; done >'$work/first'" \
+        'exit 130' >"$work/filter/fzf"
+    chmod +x "$work/filter/fzf"
+    # Every gradient that fades with another, as the listing has them.
+    paired="$(bg | sed -n 's/^[* ] \([a-z]*\) .*fades with.*/\1/p')"
+    name_ranks_first() {
+        PICK_QUERIES="$(printf '%s' "$paired" | tr '\n' ' ')" PATH="$work/filter:$PATH" bin/ghostty-bg -p </dev/null
+        [ "$(cat "$work/first")" = "$paired" ]
+    }
+    check "typing a paired gradient's name in the picker ranks it first, not its partner" name_ranks_first
+else
+    echo "skip  the picker's search (no fzf, or one older than the picker needs)"
+fi
 
 # A stand-in Ghostty whose config, wherever it keeps it, includes the
 # throwaway ghostty-bg.conf, and a stand-in fzf new enough for the picker,
