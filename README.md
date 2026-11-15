@@ -12,11 +12,11 @@ picker with live color previews, while keeping your text readable.
   (`wildfire`, `lagoon`, `prism`), still or, for six pairs, slowly fading
   into each other and back with `-a`
 - **Four animated scenes:** `jellyfish`, sea nettles drifting up through
-  deep water; `matrix`, slow, muted falling code; `hearth`, for winter, a
-  fire crackling in a brick fireplace as played off a worn videotape, an
-  homage to the fireplace videos that kept the yule log burning on TV;
-  and, for light themes, `lake`, tiny boats crossing a calm lake at golden
-  hour, seen from above
+  deep water; `matrix`, slow, muted falling code, softly glowing, in three
+  planes of depth; `hearth`, for winter, a fire crackling in a brick
+  fireplace as played off a worn videotape, an homage to the fireplace
+  videos that kept the yule log burning on TV; and, for light themes,
+  `lake`, tiny boats crossing a calm lake at golden hour, seen from above
 - **Your own images**, copied in from any format ImageMagick reads
 - **A picker** (`ghostty-bg -p`) with color swatches and a preview of each
   gradient over your theme; ctrl-t tries one without leaving it
