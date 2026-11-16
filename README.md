@@ -43,8 +43,9 @@ picker with live color previews, while keeping your text readable.
 
 ## Install
 
-Needs Ghostty and bash (3.2 or later, so macOS's own works). fzf is needed
-for the picker, and ImageMagick for importing images and `--png`;
+Needs Ghostty, 1.3 or later for gradients and scenes (images work from
+1.2), and bash (3.2 or later, so macOS's own works). fzf 0.63 or later is
+needed for the picker, and ImageMagick for importing images and `--png`;
 everything else works without them.
 
 ```sh
@@ -53,9 +54,9 @@ git clone https://github.com/pglockner/ghostty-bg.git ~/projects/ghostty-bg
 ```
 
 The script installs fzf and ImageMagick if they're missing, with Homebrew,
-pacman, apt, dnf, zypper or apk, whichever it finds; links `ghostty-bg` into
-`~/.local/bin`; and checks Ghostty's config for the line below. It's safe to
-run again.
+pacman, apt, dnf, zypper or apk, whichever it finds, and says so if that fzf
+is too old for the picker; links `ghostty-bg` into `~/.local/bin`; and checks
+Ghostty's config for the line below. It's safe to run again.
 
 Then add this line to Ghostty's config file (cmd-, opens it on macOS,
 ctrl-, on Linux); the `?` lets Ghostty start before the file exists:
@@ -128,8 +129,9 @@ elsewhere or sync them between machines.
 
 A scene is a GLSL file in `scenes/` that defines `mainImage`, the way
 [Shadertoy](https://www.shadertoy.com) shaders do. ghostty-bg puts
-`const float STRENGTH` (the opacity), `const bool Y_DOWN`, and
-`screen_at` and `to_screen` in front of it. Read the screen with
+`const float STRENGTH` (the opacity), `const bool Y_DOWN`, `const bool
+LINEAR` (whether the screen comes in linear light), and `screen_at` and
+`to_screen`, which allow for it, in front of it. Read the screen with
 `screen_at(uv)` rather than `texture(iChannel0, uv)`, hand the color back
 through `to_screen`, and use `STRENGTH` and `iBackgroundColor` to tint only
 the background, as `scenes/matrix.glsl` does. Ghostty's `fragCoord.y` runs

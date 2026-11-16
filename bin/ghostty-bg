@@ -32,16 +32,17 @@ Ghostty's config with this line (the ? lets Ghostty start without it):
 
 A running Ghostty 1.3 or later that includes it is then told to reload its
 config; otherwise reload it by hand (cmd-shift-, on macOS, ctrl-shift-, on
-Linux).
+Linux). Gradients and scenes need Ghostty 1.3 or later too: an older one
+leaves them out without a word. Images work from 1.2.
 
   -o N             opacity for this background, 0 to 1. It is remembered on
                    this machine, so each background comes back at its own
                    opacity; one that was never given an opacity starts at
                    its gradient's or scene's own, if it has one, or else
                    0.25, and a gradient no higher than text stays
-                   readable over the theme. A
-                   gradient set past the opacity at which text can stay
-                   readable says so, and how far it can go.
+                   readable over the theme. A gradient set past the
+                   opacity at which text can stay readable says so, and
+                   how far it can go.
   -r, --reset      forget the opacity remembered for NAME (or the active
                    background) and switch to it at its starting opacity.
   -R, --reset-all  forget every remembered opacity, and put the active
@@ -52,11 +53,11 @@ Linux).
   -p, --pick       choose a background in fzf, which shows each gradient's
                    colors and how it will look over the theme's background,
                    then asks for its opacity (enter keeps it) and, for a
-                   gradient with a partner, whether it fades. Needs fzf.
-                   ctrl-s on a gradient saves it as an image instead,
-                   like --png. ctrl-t tries the highlighted background
-                   without leaving the picker; esc puts back the one that
-                   was in use.
+                   gradient with a partner, whether it fades. Needs fzf
+                   0.63 or later. ctrl-s on a gradient saves it as an
+                   image instead, like --png. ctrl-t tries the highlighted
+                   background without leaving the picker; esc puts back the
+                   one that was in use.
   -i, --png        save the gradient GRADIENT as a 3840x2160 PNG image in
                    ~/Pictures/ghostty-bg/ instead of switching to it, for
                    apps that take a background image (atrium, iTerm2).
@@ -65,7 +66,8 @@ Linux).
   -a, --animated   fade the gradient slowly into its partner and back, over
                    and over: each holds for 30 seconds, then eases into the
                    other over 15, at the named one's opacity. Only some
-                   gradients have a partner; the listing shows which. Not
+                   gradients have a partner; the listing shows which. A
+                   scene is always animated, with or without -a. Not
                    remembered: the next switch without it is still again,
                    though changing only the opacity keeps it. Ghostty
                    redraws the focused terminal continuously while it runs.
@@ -93,8 +95,9 @@ scene, which is made for light ones.
 A scene is a shader kept as scenes/NAME.glsl in ghostty-bg's own folder,
 NAME in lowercase letters. It is copied in with `const float STRENGTH` (the
 opacity), `const bool Y_DOWN` (whether fragCoord's y runs down the
-screen: it does on macOS, not on Linux), and screen_at and to_screen put
-in front, and is always animated. To add one, add a file there that
+screen: it does on macOS, not on Linux), `const bool LINEAR` (whether the
+screen comes in linear light), and screen_at and to_screen, which allow
+for it, put in front, and is always animated. To add one, add a file that
 defines mainImage, reads the screen with screen_at, hands back its color
 through to_screen, and uses STRENGTH, Y_DOWN and iBackgroundColor the way
 the others do, with a line "// ghostty-bg starts this scene at opacity N."
@@ -130,6 +133,8 @@ OPACITIES="$STATE/opacity"
 # Where --png puts gradients rendered as images.
 PNGS="$HOME/Pictures/ghostty-bg"
 DEFAULT_OPACITY=0.25
+# The oldest fzf the picker runs with: it uses --footer, which came in 0.63.
+FZF_MIN=0.63
 # How fit_text keeps text readable over a gradient: the contrast to aim for
 # at most (WCAG's AA level), and how much of it a background may cost before
 # anything changes (orchid and velvet, at 0.7, stay within it).
@@ -283,17 +288,14 @@ shown() {
 # sed -i takes different arguments on macOS and Linux.
 edit_conf() { sed "$1" "$CONF" >"$CONF.tmp" && mv "$CONF.tmp" "$CONF"; }
 
-# Set KEY = VALUE in the config, replacing its line or adding one.
-set_conf() {
-    local key=$1 value=$2
-    if grep -q "^$key = " "$CONF"; then
-        edit_conf "s|^$key = .*|$key = $value|"
-    else
-        printf '%s = %s\n' "$key" "$value" >>"$CONF"
-    fi
-}
-
 unset_conf() { edit_conf "/^$1 = /d"; }
+
+# Set KEY = VALUE in the config: its old line goes and a new one is added,
+# so the value is written as it is, whatever characters a path has in it.
+set_conf() {
+    unset_conf "$1"
+    printf '%s = %s\n' "$1" "$2" >>"$CONF"
+}
 
 # The name of the background the config points at, if it is one of ours. A
 # shader's file is GRADIENT-OPACITY[-animated].glsl.
@@ -302,23 +304,32 @@ active() {
         -e 's|^background-image = .*/\(.*\)\.jpg$|\1|p' "$CONF" | head -n 1
 }
 
+# The remembered opacities' lines: NAME's own (WHICH is "of") or all the
+# others ("but"). A line is a name, a space and its opacity, and an image's
+# name may have spaces in it, so the opacity is whatever follows the last one.
+opacity_lines() {
+    awk -v which="$1" -v n="$2" '{ name = $0; sub(/ [^ ]*$/, "", name) }
+        (name == n) == (which == "of")' "$OPACITIES" 2>/dev/null || true
+}
+
 opacity_of() {
     local found
-    found="$(awk -v n="$1" '$1 == n { print $2 }' "$OPACITIES" 2>/dev/null || true)"
+    found="$(opacity_lines of "$1")"
+    found="${found##* }"
     [ -n "$found" ] || found="$(default_opacity "$1")"
     printf '%s' "$found"
 }
 
 remember_opacity() {
     local name=$1 value=$2 rest
-    rest="$(awk -v n="$name" '$1 != n' "$OPACITIES" 2>/dev/null || true)"
+    rest="$(opacity_lines but "$name")"
     printf '%s\n' "$rest" "$name $value" | sed '/^$/d' | sort >"$OPACITIES"
 }
 
 # Drop NAME's remembered opacity, so it goes back to its starting one.
 forget_opacity() {
     local rest
-    rest="$(awk -v n="$1" '$1 != n' "$OPACITIES" 2>/dev/null || true)"
+    rest="$(opacity_lines but "$1")"
     printf '%s\n' "$rest" | sed '/^$/d' >"$OPACITIES"
 }
 
@@ -615,6 +626,31 @@ reload_ghostty() {
     fi
     # shellcheck disable=SC2086
     kill -USR2 $pids 2>/dev/null
+}
+
+# Whether version $1 (as 1.2.3) is at least $2 (as 1.2), by its first two
+# numbers.
+at_least() {
+    awk -v v="$1" -v m="$2" 'BEGIN {
+        split(v, a, "."); split(m, b, ".")
+        exit !(a[1] + 0 > b[1] + 0 || (a[1] + 0 == b[1] + 0 && a[2] + 0 >= b[2] + 0))
+    }'
+}
+
+# Die unless the picker can run here: it needs fzf, and one no older than
+# FZF_MIN. An older one may be all the package manager has, so that
+# message points at fzf's own instructions instead of the install command.
+# A version that can't be read is let through.
+need_fzf() {
+    local v
+    command -v fzf >/dev/null 2>&1 || die "the picker needs fzf $FZF_MIN or later: $(install_hint fzf)"
+    v="$(fzf --version 2>/dev/null | awk 'NR == 1 { print $1 }')"
+    case "$v" in
+        [0-9]*.[0-9]*)
+            at_least "$v" "$FZF_MIN" ||
+                die "the picker needs fzf $FZF_MIN or later, and this one is $v; if your package manager has none newer, see https://github.com/junegunn/fzf#installation"
+            ;;
+    esac
 }
 
 # ImageMagick: version 7's magick, or version 6's convert.
@@ -985,11 +1021,13 @@ export_png() {
 }
 
 # One picker line: NAME, a tab, then what fzf shows: a star if it is
-# CURRENT, the name, its opacity, a SWATCH and its KIND.
+# CURRENT and the name, then after another tab its opacity, a SWATCH and
+# its KIND. The second tab ends what the picker searches: the name, not
+# the kind, which names a fading gradient's partner.
 pick_row() {
     local mark=' '
     [ "$1" != "$2" ] || mark='*'
-    printf '%s\t%s %-10s %-5s %s %s\n' "$1" "$mark" "$1" "$(opacity_of "$1")" "$3" "$4"
+    printf '%s\t%s %-10s\t%-5s %s %s\n' "$1" "$mark" "$1" "$(opacity_of "$1")" "$3" "$4"
 }
 
 # ", fades with OTHER" for a gradient that fades with -a, or nothing.
@@ -1006,7 +1044,7 @@ pick_rows() {
     local current=$1 name blank mark=' '
     blank="$(printf '%16s' '')"
     [ -n "$current" ] || mark='*'
-    printf '%s\t%s %-10s %-5s %s %s\n' -n "$mark" none "" "$blank" "no background"
+    printf '%s\t%s %-10s\t%-5s %s %s\n' -n "$mark" none "" "$blank" "no background"
     printf '%s\n' "$PRESETS" | awk '{ print $1 }' | sort | while IFS= read -r name; do
         # shellcheck disable=SC2046
         pick_row "$name" "$current" "$(bar 16 1 "" 1 $(colors_of "$name"))" "gradient$(fades_kind "$name")"
@@ -1090,7 +1128,7 @@ cancelled() {
 # in use when it opened is put back.
 pick() {
     local current rows pos choice name value answer hint max
-    command -v fzf >/dev/null 2>&1 || die "picking needs fzf: $(install_hint fzf)"
+    need_fzf
     current="$(active)"
     ORIGINAL=$current
     ORIGINAL_LINES="$(background_lines)"
@@ -1099,14 +1137,17 @@ pick() {
     rows="$(pick_rows "$current")"
     pos="$(printf '%s\n' "$rows" | awk -F '\t' -v c="$current" '$1 == c { print NR; exit }')"
     # With --expect, fzf prints the key that ended it (empty for enter),
-    # then the choice.
-    choice="$(printf '%s\n' "$rows" | fzf --ansi --delimiter '\t' --with-nth 2 --accept-nth 1 \
+    # then the choice. It shows a row from its second field on, the tab
+    # between them one space wide, and searches the first of those, the
+    # name. change:first puts the cursor on the best match as the search
+    # is typed; fzf would leave it as far down as it was, on another row.
+    choice="$(printf '%s\n' "$rows" | fzf --ansi --delimiter '\t' --with-nth 2.. --nth 1 --tabstop 1 --accept-nth 1 \
         --layout reverse --height 80% --border --border-label ' ghostty-bg ' \
         --prompt 'background> ' \
         --header $'enter switch · ctrl-s PNG · esc cancel\n↑↓ move · ctrl-t try · type to search' \
         --footer $'then opacity: enter keeps · d default\npairs: fade y/N · ctrl-c cancel' \
         --footer-border line \
-        --expect ctrl-s --bind "load:pos(${pos:-1})" \
+        --expect ctrl-s --bind "load:pos(${pos:-1})" --bind change:first \
         --bind "ctrl-t:execute-silent('$REPO/bin/ghostty-bg' {1})" \
         --preview "'$REPO/bin/ghostty-bg' --preview {1}" --preview-window 'right,55%,<50(down,40%)')" || cancelled
     name="$(printf '%s\n' "$choice" | sed -n 2p)"
@@ -1141,6 +1182,18 @@ pick() {
     trap - INT
     activate "$name"
 }
+
+# scripts/install.sh asks what is in place as `ghostty-bg --has WHAT`:
+# picker, whether the picker can run here (if not, it says why), or
+# include, whether Ghostty's config includes ghostty-bg.conf.
+if [ "${1:-}" = "--has" ]; then
+    case "${2:-}" in
+        picker) need_fzf ;;
+        include) in_use || exit 1 ;;
+        *) exit 2 ;;
+    esac
+    exit 0
+fi
 
 THEME_COLORS="$(read_theme_colors)"
 OPACITY_TABLE="$(gradient_opacities)"

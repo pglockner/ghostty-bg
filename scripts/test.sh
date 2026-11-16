@@ -159,10 +159,13 @@ bg sample >/dev/null
 check "an image clears the shader" empty "$shaders"
 check "an image drops the shader lines" lacks "$conf" '^custom-shader'
 check "an image is named in the config" has "$conf" '^background-image = .*/sample.jpg$'
-mkdir -p "$work/elsewhere"
-im -size 64x40 gradient:black-maroon "$work/elsewhere/other.jpg"
-GHOSTTY_BG_IMAGES="$work/elsewhere" bg other >/dev/null
-check "GHOSTTY_BG_IMAGES points at another image folder" has "$conf" "^background-image = .*/elsewhere/other.jpg$"
+mkdir -p "$work/else & where"
+im -size 64x40 gradient:black-maroon "$work/else & where/other.jpg"
+GHOSTTY_BG_IMAGES="$work/else & where" bg other >/dev/null
+check "GHOSTTY_BG_IMAGES points at another image folder, even one with & in its path" has "$conf" "^background-image = $work/else & where/other.jpg$"
+cp "$state/backgrounds/sample.jpg" "$state/backgrounds/two words.jpg"
+bg -o 0.6 'two words' >/dev/null
+check "an image with a space in its name keeps its opacity" has "$conf" '^background-image-opacity = 0.6$'
 
 bg jellyfish >/dev/null
 check "leaving an image drops its opacity line" lacks "$conf" '^background-image'
@@ -235,6 +238,50 @@ check "an opacity over 1 fails" fails bg -o 2 orchid
 check "the picker previews a gradient's colors" previews orchid '#6a1b6e #3b1f8a #0d4a8a'
 check "the picker previews a scene's description" previews jellyfish 'Sea nettles'
 check "a scene's preview leaves out the copying note" fails previews jellyfish 'ghostty-bg puts'
+# A stand-in for an fzf too old for the picker, as Ubuntu 24.04's is: it
+# gives its version and knows none of the picker's options.
+mkdir -p "$work/oldfzf"
+printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then echo "0.44.1 (stand-in)"; else echo "unknown option: $1" >&2; exit 2; fi' >"$work/oldfzf/fzf"
+chmod +x "$work/oldfzf/fzf"
+# With it first on the PATH, -p fails and names the version it needs.
+old_fzf_refused() {
+    local said
+    if said="$(PATH="$work/oldfzf:$PATH" bin/ghostty-bg -p 2>&1 </dev/null)"; then return 1; fi
+    printf '%s\n' "$said" | grep -q 'fzf 0\.63'
+}
+check "the picker refuses an fzf too old for it, and says which it needs" old_fzf_refused
+# The picker's search, without a keyboard: a stand-in fzf that hands the
+# picker's own rows and options to the real one with --filter, once for each
+# word of $PICK_QUERIES, saves the row ranked first for each, and cancels.
+# That is the ranking only: which row is highlighted is fzf's doing as keys
+# are typed, which --filter doesn't run.
+if bin/ghostty-bg --has picker 2>/dev/null; then
+    mkdir -p "$work/filter"
+    printf '%s\n' '#!/bin/sh' "[ \"\$1\" != --version ] || exec '$(command -v fzf)' --version" "cat >'$work/rows'" \
+        "for q in \$PICK_QUERIES; do '$(command -v fzf)' \"\$@\" --filter \"\$q\" <'$work/rows' | head -n 1; done >'$work/first'" \
+        'exit 130' >"$work/filter/fzf"
+    chmod +x "$work/filter/fzf"
+    # Every gradient that fades with another, as the listing has them.
+    paired="$(bg | sed -n 's/^[* ] \([a-z]*\) .*fades with.*/\1/p')"
+    name_ranks_first() {
+        PICK_QUERIES="$(printf '%s' "$paired" | tr '\n' ' ')" PATH="$work/filter:$PATH" bin/ghostty-bg -p </dev/null
+        [ "$(cat "$work/first")" = "$paired" ]
+    }
+    check "typing a paired gradient's name in the picker ranks it first, not its partner" name_ranks_first
+else
+    echo "skip  the picker's search (no fzf, or one older than the picker needs)"
+fi
+
+# A stand-in Ghostty whose config, wherever it keeps it, includes the
+# throwaway ghostty-bg.conf, and a stand-in fzf new enough for the picker,
+# so scripts/install.sh finds nothing to install. The Ghostty answers only
+# +show-config: with a version too, a switch would signal a real Ghostty.
+mkdir -p "$work/installed"
+printf '%s\n' '#!/bin/sh' "[ \"\$1\" != +show-config ] || echo 'config-file = ?$conf'" >"$work/installed/ghostty"
+printf '%s\n' '#!/bin/sh' 'echo "0.63.0 (stand-in)"' >"$work/installed/fzf"
+chmod +x "$work/installed/ghostty" "$work/installed/fzf"
+installs() { PATH="$work/installed:$PATH" scripts/install.sh | grep -- "$1" >/dev/null; }   # TEXT: install.sh prints TEXT
+check "install.sh asks Ghostty whether its config includes ghostty-bg" installs 'already includes'
 
 if [ "$failed" -gt 0 ]; then
     echo "$failed failed"
