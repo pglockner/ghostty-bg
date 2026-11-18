@@ -458,9 +458,9 @@ y_down() { if [ "$(uname)" = Darwin ]; then echo true; else echo false; fi; }
 # everywhere but macOS. Its colors, iBackgroundColor among them, come as
 # stored (sRGB) either way. The shaders take it from LINEAR.
 linear() {
-    local g blending=""
-    g="$(ghostty_bin)"
-    [ -z "$g" ] || blending="$("$g" +show-config 2>/dev/null | awk -F ' *= *' '$1 == "alpha-blending" { print $2; exit }')"
+    local config blending
+    config="$(show_config)"
+    blending="$(awk -F ' *= *' '$1 == "alpha-blending" { print $2; exit }' <<<"$config")"
     if [ -z "$blending" ]; then
         if [ "$(uname)" = Darwin ]; then blending=native; else blending=linear-corrected; fi
     fi
@@ -594,10 +594,9 @@ reload_key() { if [ "$(uname)" = Darwin ]; then echo cmd-shift-,; else echo ctrl
 # config-file lines with ~ expanded and a leading ? kept. A different one
 # (a test's, say) leaves Ghostty alone.
 in_use() {
-    local g
-    g="$(ghostty_bin)"
-    [ -n "$g" ] || return 1
-    "$g" +show-config 2>/dev/null | sed -n 's/^config-file = ?\{0,1\}//p' | grep -qxF "$CONF"
+    local config
+    config="$(show_config)"
+    sed -n 's/^config-file = ?\{0,1\}//p' <<<"$config" | grep -qxF "$CONF"
 }
 
 # Ghostty's command-line binary, or nothing if it isn't installed.
@@ -606,6 +605,18 @@ ghostty_bin() {
     g="$(command -v ghostty || echo /Applications/Ghostty.app/Contents/MacOS/ghostty)"
     [ -x "$g" ] || return 0
     printf '%s' "$g"
+}
+
+# Ghostty's config as `ghostty +show-config` lists it, or nothing
+# without Ghostty. Callers filter it from a variable, not a pipe: a filter
+# that stops at its first match (awk's exit, grep -q) closes the pipe, and
+# Ghostty, failing to write the rest, exits 1, which pipefail makes the
+# pipeline's status. Ghostty on Linux writes it in pieces and loses that
+# race most of the time, which made -p quit without a word.
+show_config() {
+    local g
+    g="$(ghostty_bin)"
+    [ -z "$g" ] || "$g" +show-config 2>/dev/null || true
 }
 
 # Have a running Ghostty reload its config, which it does on SIGUSR2. Seen
@@ -830,10 +841,9 @@ normal_opacity() {
 # The current theme's background color as #rrggbb, or nothing if Ghostty
 # can't be asked.
 theme_bg() {
-    local g
-    g="$(ghostty_bin)"
-    [ -n "$g" ] || return 0
-    "$g" +show-config 2>/dev/null | awk '$1 == "background" && $2 == "=" { print $3; exit }'
+    local config
+    config="$(show_config)"
+    awk '$1 == "background" && $2 == "=" { print $3; exit }' <<<"$config"
 }
 
 # The current theme's background, foreground and palette colors 1 to 15, as
