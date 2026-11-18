@@ -1151,8 +1151,9 @@ pick() {
     # between them one space wide, and searches the first of those, the
     # name. change:first puts the cursor on the best match as the search
     # is typed; fzf would leave it as far down as it was, on another row.
+    # --height=-1 takes the whole window but a line, the command's own.
     choice="$(printf '%s\n' "$rows" | fzf --ansi --delimiter '\t' --with-nth 2.. --nth 1 --tabstop 1 --accept-nth 1 \
-        --layout reverse --height 80% --border --border-label ' ghostty-bg ' \
+        --layout reverse --height=-1 --border --border-label ' ghostty-bg ' \
         --prompt 'background> ' \
         --header $'enter switch · ctrl-s PNG · esc cancel\n↑↓ move · ctrl-t try · type to search' \
         --footer $'then opacity: enter keeps · d default\npairs: fade y/N · ctrl-c cancel' \
